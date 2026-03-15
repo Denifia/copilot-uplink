@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { useState, useEffect, useRef } from 'preact/hooks';
+import { useEffect, useRef } from 'preact/hooks';
 import { Conversation, ConversationMessage } from '../conversation.js';
 import type { TimelineEntry } from '../conversation.js';
 import { ToolCallCard } from './tool-call.js';
@@ -113,11 +113,11 @@ function TimelineItem({
 }) {
   switch (entry.type) {
     case 'message': {
-      const msg = conversation.messages[entry.index];
+      const msg = conversation.messages.value[entry.index];
       return msg ? <ChatMessage msg={msg} /> : null;
     }
     case 'toolCall': {
-      const tc = conversation.toolCalls.get(entry.toolCallId);
+      const tc = conversation.toolCalls.value.get(entry.toolCallId);
       return tc ? <ToolCallCard tc={tc} /> : null;
     }
     case 'permission': {
@@ -131,7 +131,7 @@ function TimelineItem({
     case 'plan':
       return <PlanCard conversation={conversation} />;
     case 'shell': {
-      const sr = conversation.shellResults.get(entry.id);
+      const sr = conversation.shellResults.value.get(entry.id);
       return sr ? <ShellOutput command={sr.command} stdout={sr.stdout} stderr={sr.stderr} exitCode={sr.exitCode} /> : null;
     }
   }
@@ -149,7 +149,7 @@ function timelineKey(entry: TimelineEntry): string {
 
 /**
  * Renders the conversation timeline.
- * Subscribes to Conversation.onChange() to re-render on new messages/streaming.
+ * Components reading signal `.value` auto-subscribe via @preact/signals.
  */
 export function ChatList({
   conversation,
@@ -158,25 +158,17 @@ export function ChatList({
   conversation: Conversation;
   scrollContainer: HTMLElement;
 }) {
-  const [, setVersion] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    return conversation.onChange(() => setVersion((v) => v + 1));
-  }, [conversation]);
-
   // Show thinking indicator when prompting but no agent response yet
-  const lastMsg = conversation.messages[conversation.messages.length - 1];
-  const showThinking = conversation.isPrompting &&
+  const msgs = conversation.messages.value;
+  const lastMsg = msgs[msgs.length - 1];
+  const showThinking = conversation.isPrompting.value &&
     (!lastMsg || lastMsg.role === 'user');
 
   // Auto-scroll only when the user is "following" the conversation (near the bottom).
-  // If they've scrolled up to read, leave them alone.
-  // We check the gap BEFORE render (captured in a ref) because after render the new
-  // content has already increased scrollHeight, making the gap appear large.
-  const FOLLOW_THRESHOLD = 50; // px from bottom to count as "following"
+  const FOLLOW_THRESHOLD = 50;
   const wasFollowing = useRef(true);
-  // Capture follow state before each render via a layout-time check
   const gap = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight;
   wasFollowing.current = gap <= FOLLOW_THRESHOLD;
 
@@ -186,9 +178,11 @@ export function ChatList({
     }
   });
 
+  const timeline = conversation.timeline.value;
+
   return (
     <>
-      {conversation.timeline.map((entry) => (
+      {timeline.map((entry) => (
         <TimelineItem key={timelineKey(entry)} entry={entry} conversation={conversation} />
       ))}
       {showThinking && (

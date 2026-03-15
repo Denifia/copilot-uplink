@@ -162,7 +162,7 @@ describe('ChatList', () => {
   it('shows thinking dots when prompting', () => {
     const conv = new Conversation();
     conv.addUserMessage('hello');
-    conv.isPrompting = true;
+    conv.prompting = true;
 
     const scrollContainer = document.createElement('div');
     const { container } = render(

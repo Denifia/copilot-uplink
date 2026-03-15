@@ -7,6 +7,7 @@ import type {
   PermissionOption,
   PlanEntry,
 } from "../shared/acp-types";
+import { signal, batch, type ReadonlySignal } from "@preact/signals";
 
 // ─── Data Models ──────────────────────────────────────────────────────
 
@@ -57,59 +58,48 @@ export type TimelineEntry =
 // ─── Conversation State ───────────────────────────────────────────────
 
 export class Conversation {
-  messages: ConversationMessage[] = [];
-  toolCalls: Map<string, TrackedToolCall> = new Map();
-  permissions: TrackedPermission[] = [];
-  shellResults: Map<number, TrackedShellResult> = new Map();
-  plan: TrackedPlan | null = null;
-  timeline: TimelineEntry[] = [];
-  isPrompting = false;
+  // Reactive state — components that read `.value` auto-subscribe via @preact/signals.
+  private readonly _messages = signal<ConversationMessage[]>([]);
+  private readonly _toolCalls = signal<Map<string, TrackedToolCall>>(new Map());
+  private readonly _permissions = signal<TrackedPermission[]>([]);
+  private readonly _shellResults = signal<Map<number, TrackedShellResult>>(new Map());
+  private readonly _plan = signal<TrackedPlan | null>(null);
+  private readonly _timeline = signal<TimelineEntry[]>([]);
+  private readonly _isPrompting = signal(false);
+
+  // Read-only signal accessors for consumers.
+  get messages(): ReadonlySignal<ConversationMessage[]> { return this._messages; }
+  get toolCalls(): ReadonlySignal<Map<string, TrackedToolCall>> { return this._toolCalls; }
+  get permissions(): ReadonlySignal<TrackedPermission[]> { return this._permissions; }
+  get shellResults(): ReadonlySignal<Map<number, TrackedShellResult>> { return this._shellResults; }
+  get plan(): ReadonlySignal<TrackedPlan | null> { return this._plan; }
+  get timeline(): ReadonlySignal<TimelineEntry[]> { return this._timeline; }
+  get isPrompting(): ReadonlySignal<boolean> { return this._isPrompting; }
+
+  set prompting(value: boolean) { this._isPrompting.value = value; }
+
   private nextShellId = 0;
   private nextThinkingId = 0;
   private activeThinkingId: string | null = null;
 
-  private listeners: Set<() => void> = new Set();
-
-  /** Register a change listener. Returns an unsubscribe function. */
-  onChange(listener: () => void): () => void {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
-  }
-
-  private notifyScheduled = false;
-
-  notify(): void {
-    if (this.notifyScheduled) return;
-    this.notifyScheduled = true;
-    queueMicrotask(() => {
-      this.notifyScheduled = false;
-      for (const listener of this.listeners) {
-        listener();
-      }
-    });
-  }
-
   // ─── User input ───────────────────────────────────────────────────
 
   addUserMessage(text: string): void {
-    this.messages.push({ role: "user", content: text, timestamp: Date.now() });
-    this.timeline.push({ type: "message", index: this.messages.length - 1 });
-    this.notify();
+    this._messages.value = [...this._messages.value, { role: "user", content: text, timestamp: Date.now() }];
+    this._timeline.value = [...this._timeline.value, { type: "message", index: this._messages.value.length - 1 }];
   }
 
   addSystemMessage(text: string): void {
-    this.messages.push({ role: "system", content: text, timestamp: Date.now() });
-    this.timeline.push({ type: "message", index: this.messages.length - 1 });
-    this.notify();
+    this._messages.value = [...this._messages.value, { role: "system", content: text, timestamp: Date.now() }];
+    this._timeline.value = [...this._timeline.value, { type: "message", index: this._messages.value.length - 1 }];
   }
 
   addShellResult(command: string, stdout: string, stderr: string, exitCode: number): void {
     const id = this.nextShellId++;
-    this.shellResults.set(id, { id, command, stdout, stderr, exitCode });
-    this.timeline.push({ type: "shell", id });
-    this.notify();
+    const newResults = new Map(this._shellResults.value);
+    newResults.set(id, { id, command, stdout, stderr, exitCode });
+    this._shellResults.value = newResults;
+    this._timeline.value = [...this._timeline.value, { type: "shell", id }];
   }
 
   // ─── Session update routing ───────────────────────────────────────
@@ -135,8 +125,9 @@ export class Conversation {
         );
         break;
 
-      case "tool_call":
-        this.toolCalls.set(update.toolCallId, {
+      case "tool_call": {
+        const newToolCalls = new Map(this._toolCalls.value);
+        newToolCalls.set(update.toolCallId, {
           toolCallId: update.toolCallId,
           title: update.title,
           kind: update.kind,
@@ -145,13 +136,14 @@ export class Conversation {
           locations: update.locations ?? [],
           rawInput: update.rawInput,
         });
-        this.timeline.push({ type: "toolCall", toolCallId: update.toolCallId });
+        this._toolCalls.value = newToolCalls;
+        this._timeline.value = [...this._timeline.value, { type: "toolCall", toolCallId: update.toolCallId }];
         break;
+      }
 
       case "tool_call_update": {
-        const existing = this.toolCalls.get(update.toolCallId);
+        const existing = this._toolCalls.value.get(update.toolCallId);
         if (existing) {
-          // Merge content: append new items rather than replacing
           const mergedContent =
             update.content !== undefined && update.content.length > 0
               ? [...existing.content, ...update.content]
@@ -160,8 +152,8 @@ export class Conversation {
             update.locations !== undefined && update.locations.length > 0
               ? [...existing.locations, ...update.locations]
               : existing.locations;
-          // Create a new object so Preact detects the change via reference equality
-          this.toolCalls.set(update.toolCallId, {
+          const newToolCalls = new Map(this._toolCalls.value);
+          newToolCalls.set(update.toolCallId, {
             ...existing,
             ...(update.title !== undefined && { title: update.title }),
             ...(update.status !== undefined && { status: update.status }),
@@ -169,21 +161,20 @@ export class Conversation {
             content: mergedContent,
             locations: mergedLocations,
           });
+          this._toolCalls.value = newToolCalls;
         }
         break;
       }
 
       case "plan": {
-        this.plan = { entries: update.entries };
-        // Only add plan entry once
-        if (!this.timeline.some((e) => e.type === "plan")) {
-          this.timeline.push({ type: "plan" });
+        this._plan.value = { entries: update.entries };
+        const tl = this._timeline.value;
+        if (!tl.some((e) => e.type === "plan")) {
+          this._timeline.value = [...tl, { type: "plan" }];
         }
         break;
       }
     }
-
-    this.notify();
   }
 
   // ─── Permission tracking ──────────────────────────────────────────
@@ -194,61 +185,47 @@ export class Conversation {
     title: string,
     options: PermissionOption[],
   ): void {
-    this.permissions.push({
+    this._permissions.value = [...this._permissions.value, {
       requestId,
       toolCallId,
       title,
       options,
       resolved: false,
-    });
-    this.timeline.push({ type: "permission", requestId });
-    this.notify();
+    }];
+    this._timeline.value = [...this._timeline.value, { type: "permission", requestId }];
   }
 
   resolvePermission(requestId: number, optionId?: string): void {
-    const perm = this.permissions.find((p) => p.requestId === requestId);
-    if (perm) {
-      perm.resolved = true;
-      perm.selectedOptionId = optionId;
-      this.notify();
-    }
+    this._permissions.value = this._permissions.value.map((p) =>
+      p.requestId === requestId
+        ? { ...p, resolved: true, selectedOptionId: optionId }
+        : p,
+    );
   }
 
   // ─── Computed helpers ─────────────────────────────────────────────
 
   get activeToolCalls(): TrackedToolCall[] {
-    return [...this.toolCalls.values()].filter(
+    return [...this._toolCalls.value.values()].filter(
       (tc) => tc.status !== "completed" && tc.status !== "failed",
     );
   }
 
   get pendingPermissions(): TrackedPermission[] {
-    return this.permissions.filter((p) => !p.resolved);
+    return this._permissions.value.filter((p) => !p.resolved);
   }
 
   // ─── Reset ────────────────────────────────────────────────────────
 
   clear(): void {
-    this.messages = [];
-    this.toolCalls.clear();
-    this.permissions = [];
-    this.shellResults.clear();
-    this.plan = null;
-    this.timeline = [];
-    this.nextShellId = 0;
-    this.nextThinkingId = 0;
-    this.activeThinkingId = null;
-    this.notify();
-  }
-
-  /** Reset state without notifying listeners (used before replay to avoid flash). */
-  clearSilently(): void {
-    this.messages = [];
-    this.toolCalls.clear();
-    this.permissions = [];
-    this.shellResults.clear();
-    this.plan = null;
-    this.timeline = [];
+    batch(() => {
+      this._messages.value = [];
+      this._toolCalls.value = new Map();
+      this._permissions.value = [];
+      this._shellResults.value = new Map();
+      this._plan.value = null;
+      this._timeline.value = [];
+    });
     this.nextShellId = 0;
     this.nextThinkingId = 0;
     this.activeThinkingId = null;
@@ -256,61 +233,62 @@ export class Conversation {
 
   // ─── Private helpers ──────────────────────────────────────────────
 
-  /** Move a timeline entry matching `predicate` to the end (most-recently-updated → closest to input). */
+  /** Move a timeline entry matching `predicate` to the end. */
   private moveToEnd(predicate: (e: TimelineEntry) => boolean): void {
-    const idx = this.timeline.findIndex(predicate);
-    if (idx >= 0 && idx < this.timeline.length - 1) {
-      const [entry] = this.timeline.splice(idx, 1);
-      this.timeline.push(entry);
+    const tl = this._timeline.value;
+    const idx = tl.findIndex(predicate);
+    if (idx >= 0 && idx < tl.length - 1) {
+      const entry = tl[idx];
+      this._timeline.value = [...tl.slice(0, idx), ...tl.slice(idx + 1), entry];
     }
   }
 
   private appendAgentText(text: string): void {
-    const last = this.messages[this.messages.length - 1];
+    const msgs = this._messages.value;
+    const last = msgs[msgs.length - 1];
     if (last?.role === "agent") {
-      // Trim leading whitespace until we have visible content
-      if (!last.content.trim()) {
-        last.content = (last.content + text).trimStart();
-      } else {
-        last.content += text;
-      }
-      const msgIndex = this.messages.length - 1;
+      const newContent = !last.content.trim()
+        ? (last.content + text).trimStart()
+        : last.content + text;
+      this._messages.value = [...msgs.slice(0, -1), { ...last, content: newContent }];
+      const msgIndex = this._messages.value.length - 1;
       this.moveToEnd((e) => e.type === "message" && e.index === msgIndex);
     } else if (text.trim()) {
-      this.messages.push({ role: "agent", content: text.trimStart(), timestamp: Date.now() });
-      this.timeline.push({ type: "message", index: this.messages.length - 1 });
+      this._messages.value = [...msgs, { role: "agent", content: text.trimStart(), timestamp: Date.now() }];
+      this._timeline.value = [...this._timeline.value, { type: "message", index: this._messages.value.length - 1 }];
     }
   }
 
   private appendUserText(text: string): void {
-    const last = this.messages[this.messages.length - 1];
+    const msgs = this._messages.value;
+    const last = msgs[msgs.length - 1];
     if (last?.role === "user") {
-      last.content += text;
-      const msgIndex = this.messages.length - 1;
+      this._messages.value = [...msgs.slice(0, -1), { ...last, content: last.content + text }];
+      const msgIndex = this._messages.value.length - 1;
       this.moveToEnd((e) => e.type === "message" && e.index === msgIndex);
     } else if (text) {
-      this.messages.push({ role: "user", content: text, timestamp: Date.now() });
-      this.timeline.push({ type: "message", index: this.messages.length - 1 });
+      this._messages.value = [...msgs, { role: "user", content: text, timestamp: Date.now() }];
+      this._timeline.value = [...this._timeline.value, { type: "message", index: this._messages.value.length - 1 }];
     }
   }
 
   private appendThinking(text: string): void {
     if (this.activeThinkingId) {
-      // Accumulate into existing thinking tool call
-      const tc = this.toolCalls.get(this.activeThinkingId);
+      const tc = this._toolCalls.value.get(this.activeThinkingId);
       if (tc && tc.content.length > 0 && tc.content[0].type === "content") {
         const inner = tc.content[0].content;
         if (inner.type === "text") {
-          inner.text += text;
+          const newContent = [{ ...tc.content[0], content: { ...inner, text: inner.text + text } }];
+          const newToolCalls = new Map(this._toolCalls.value);
+          newToolCalls.set(this.activeThinkingId, { ...tc, content: newContent });
+          this._toolCalls.value = newToolCalls;
         }
       }
-      // Create new object reference so Preact detects the change
-      this.toolCalls.set(this.activeThinkingId, { ...tc! });
     } else {
-      // Create a new thinking tool call
       const id = `thinking-${this.nextThinkingId++}`;
       this.activeThinkingId = id;
-      this.toolCalls.set(id, {
+      const newToolCalls = new Map(this._toolCalls.value);
+      newToolCalls.set(id, {
         toolCallId: id,
         title: "Thinking",
         kind: "think",
@@ -318,15 +296,18 @@ export class Conversation {
         content: [{ type: "content", content: { type: "text", text } }],
         locations: [],
       });
-      this.timeline.push({ type: "toolCall", toolCallId: id });
+      this._toolCalls.value = newToolCalls;
+      this._timeline.value = [...this._timeline.value, { type: "toolCall", toolCallId: id }];
     }
   }
 
   private completeThinking(): void {
     if (!this.activeThinkingId) return;
-    const tc = this.toolCalls.get(this.activeThinkingId);
+    const tc = this._toolCalls.value.get(this.activeThinkingId);
     if (tc) {
-      this.toolCalls.set(this.activeThinkingId, { ...tc, status: "completed" });
+      const newToolCalls = new Map(this._toolCalls.value);
+      newToolCalls.set(this.activeThinkingId, { ...tc, status: "completed" });
+      this._toolCalls.value = newToolCalls;
     }
     this.activeThinkingId = null;
   }

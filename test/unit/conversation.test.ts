@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { Conversation } from '../../src/client/conversation';
 import type { SessionUpdate, PermissionOption, PlanEntry } from '../../src/shared/acp-types';
 
@@ -16,8 +16,8 @@ describe('Conversation', () => {
         content: { type: 'text', text: 'Hello' }
       });
 
-      expect(conversation.messages).toHaveLength(1);
-      expect(conversation.messages[0]).toMatchObject({
+      expect(conversation.messages.value).toHaveLength(1);
+      expect(conversation.messages.value[0]).toMatchObject({
         role: 'agent',
         content: 'Hello'
       });
@@ -33,8 +33,8 @@ describe('Conversation', () => {
         content: { type: 'text', text: ' World' }
       });
 
-      expect(conversation.messages).toHaveLength(1);
-      expect(conversation.messages[0]).toMatchObject({
+      expect(conversation.messages.value).toHaveLength(1);
+      expect(conversation.messages.value[0]).toMatchObject({
         role: 'agent',
         content: 'Hello World'
       });
@@ -47,12 +47,12 @@ describe('Conversation', () => {
         content: { type: 'text', text: 'Greetings' }
       });
 
-      expect(conversation.messages).toHaveLength(2);
-      expect(conversation.messages[0]).toMatchObject({
+      expect(conversation.messages.value).toHaveLength(2);
+      expect(conversation.messages.value[0]).toMatchObject({
         role: 'user',
         content: 'Hi there'
       });
-      expect(conversation.messages[1]).toMatchObject({
+      expect(conversation.messages.value[1]).toMatchObject({
         role: 'agent',
         content: 'Greetings'
       });
@@ -69,10 +69,10 @@ describe('Conversation', () => {
         content: { type: 'text', text: 'Second' }
       });
 
-      expect(conversation.messages).toHaveLength(3);
-      expect(conversation.messages[0].content).toBe('First');
-      expect(conversation.messages[1].content).toBe('User reply');
-      expect(conversation.messages[2].content).toBe('Second');
+      expect(conversation.messages.value).toHaveLength(3);
+      expect(conversation.messages.value[0].content).toBe('First');
+      expect(conversation.messages.value[1].content).toBe('User reply');
+      expect(conversation.messages.value[2].content).toBe('Second');
     });
   });
 
@@ -88,8 +88,8 @@ describe('Conversation', () => {
         locations: []
       });
 
-      expect(conversation.toolCalls.size).toBe(1);
-      const call = conversation.toolCalls.get('call_1');
+      expect(conversation.toolCalls.value.size).toBe(1);
+      const call = conversation.toolCalls.value.get('call_1');
       expect(call).toBeDefined();
       expect(call?.title).toBe('Read File');
       expect(call?.status).toBe('pending');
@@ -111,7 +111,7 @@ describe('Conversation', () => {
         toolCallId: 'call_1',
         status: 'in_progress'
       });
-      expect(conversation.toolCalls.get('call_1')?.status).toBe('in_progress');
+      expect(conversation.toolCalls.value.get('call_1')?.status).toBe('in_progress');
 
       // Update to completed
       conversation.handleSessionUpdate({
@@ -119,7 +119,7 @@ describe('Conversation', () => {
         toolCallId: 'call_1',
         status: 'completed'
       });
-      expect(conversation.toolCalls.get('call_1')?.status).toBe('completed');
+      expect(conversation.toolCalls.value.get('call_1')?.status).toBe('completed');
     });
 
     it('tool_call_update adds content', () => {
@@ -138,7 +138,7 @@ describe('Conversation', () => {
         content: content
       });
 
-      expect(conversation.toolCalls.get('call_1')?.content).toEqual(content);
+      expect(conversation.toolCalls.value.get('call_1')?.content).toEqual(content);
     });
 
     it('tool_call_update appends content rather than replacing', () => {
@@ -158,7 +158,7 @@ describe('Conversation', () => {
         content: [{ type: 'content', content: { type: 'text', text: 'Output line 1' } }]
       });
 
-      const tc = conversation.toolCalls.get('call_1');
+      const tc = conversation.toolCalls.value.get('call_1');
       expect(tc?.content).toHaveLength(2);
       expect(tc?.content[0]).toEqual({ type: 'content', content: { type: 'text', text: 'Running...' } });
       expect(tc?.content[1]).toEqual({ type: 'content', content: { type: 'text', text: 'Output line 1' } });
@@ -182,7 +182,7 @@ describe('Conversation', () => {
         content: []
       });
 
-      const tc = conversation.toolCalls.get('call_1');
+      const tc = conversation.toolCalls.value.get('call_1');
       expect(tc?.status).toBe('failed');
       expect(tc?.content).toHaveLength(1);
       expect(tc?.content[0]).toEqual({ type: 'content', content: { type: 'text', text: 'Output here' } });
@@ -204,9 +204,9 @@ describe('Conversation', () => {
         status: 'pending'
       });
 
-      expect(conversation.toolCalls.size).toBe(2);
-      expect(conversation.toolCalls.has('call_1')).toBe(true);
-      expect(conversation.toolCalls.has('call_2')).toBe(true);
+      expect(conversation.toolCalls.value.size).toBe(2);
+      expect(conversation.toolCalls.value.has('call_1')).toBe(true);
+      expect(conversation.toolCalls.value.has('call_2')).toBe(true);
     });
 
     it('activeToolCalls returns only non-completed ones', () => {
@@ -247,8 +247,8 @@ describe('Conversation', () => {
     it('trackPermission creates a TrackedPermission', () => {
       conversation.trackPermission(123, 'call_1', 'Allow access?', options);
 
-      expect(conversation.permissions).toHaveLength(1);
-      expect(conversation.permissions[0]).toMatchObject({
+      expect(conversation.permissions.value).toHaveLength(1);
+      expect(conversation.permissions.value[0]).toMatchObject({
         requestId: 123,
         toolCallId: 'call_1',
         title: 'Allow access?',
@@ -260,8 +260,8 @@ describe('Conversation', () => {
       conversation.trackPermission(123, 'call_1', 'Allow access?', options);
       conversation.resolvePermission(123, 'opt1');
 
-      expect(conversation.permissions[0].resolved).toBe(true);
-      expect(conversation.permissions[0].selectedOptionId).toBe('opt1');
+      expect(conversation.permissions.value[0].resolved).toBe(true);
+      expect(conversation.permissions.value[0].selectedOptionId).toBe('opt1');
     });
 
     it('pendingPermissions returns only unresolved ones', () => {
@@ -285,7 +285,7 @@ describe('Conversation', () => {
         entries
       });
 
-      expect(conversation.plan).toEqual({ entries });
+      expect(conversation.plan.value).toEqual({ entries });
     });
 
     it('Second plan update replaces first completely', () => {
@@ -305,55 +305,44 @@ describe('Conversation', () => {
         entries: newEntries
       });
 
-      expect(conversation.plan?.entries).toHaveLength(1);
-      expect(conversation.plan?.entries[0].content).toBe('Step A');
+      expect(conversation.plan.value?.entries).toHaveLength(1);
+      expect(conversation.plan.value?.entries[0].content).toBe('Step A');
     });
   });
 
-  describe('Change notification', () => {
-    it('onChange listener called after addUserMessage', async () => {
-      const listener = vi.fn();
-      conversation.onChange(listener);
+  describe('Signal reactivity', () => {
+    it('messages signal updates synchronously after addUserMessage', () => {
+      expect(conversation.messages.value).toHaveLength(0);
       conversation.addUserMessage('test');
-      await new Promise<void>((r) => queueMicrotask(r));
-      expect(listener).toHaveBeenCalledTimes(1);
+      expect(conversation.messages.value).toHaveLength(1);
+      expect(conversation.messages.value[0].content).toBe('test');
     });
 
-    it('onChange listener called after handleSessionUpdate', async () => {
-      const listener = vi.fn();
-      conversation.onChange(listener);
+    it('messages signal updates synchronously after handleSessionUpdate', () => {
+      expect(conversation.messages.value).toHaveLength(0);
       conversation.handleSessionUpdate({
         sessionUpdate: 'agent_message_chunk',
         content: { type: 'text', text: 'hi' }
       });
-      await new Promise<void>((r) => queueMicrotask(r));
-      expect(listener).toHaveBeenCalledTimes(1);
+      expect(conversation.messages.value).toHaveLength(1);
     });
 
-    it('Unsubscribe stops notifications', async () => {
-      const listener = vi.fn();
-      const unsubscribe = conversation.onChange(listener);
-      
-      conversation.addUserMessage('first');
-      await new Promise<void>((r) => queueMicrotask(r));
-      expect(listener).toHaveBeenCalledTimes(1);
-
-      unsubscribe();
-      conversation.addUserMessage('second');
-      await new Promise<void>((r) => queueMicrotask(r));
-      expect(listener).toHaveBeenCalledTimes(1);
+    it('toolCalls signal updates synchronously', () => {
+      expect(conversation.toolCalls.value.size).toBe(0);
+      conversation.handleSessionUpdate({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tc1',
+        title: 'Test',
+        kind: 'read',
+        status: 'pending'
+      });
+      expect(conversation.toolCalls.value.size).toBe(1);
     });
 
-    it('Multiple listeners all notified', async () => {
-      const listenerA = vi.fn();
-      const listenerB = vi.fn();
-      conversation.onChange(listenerA);
-      conversation.onChange(listenerB);
-
-      conversation.addUserMessage('test');
-      await new Promise<void>((r) => queueMicrotask(r));
-      expect(listenerA).toHaveBeenCalledTimes(1);
-      expect(listenerB).toHaveBeenCalledTimes(1);
+    it('permissions signal updates synchronously', () => {
+      expect(conversation.permissions.value).toHaveLength(0);
+      conversation.trackPermission(1, 'tc1', 'Allow?', []);
+      expect(conversation.permissions.value).toHaveLength(1);
     });
   });
 
@@ -374,7 +363,7 @@ describe('Conversation', () => {
         content: { type: 'text', text: '' }
       });
       // Empty text should not create a new message (avoids empty bubbles / HR artifacts)
-      expect(conversation.messages).toHaveLength(0);
+      expect(conversation.messages.value).toHaveLength(0);
 
       // But empty text should still append to an existing message
       conversation.handleSessionUpdate({
@@ -385,8 +374,8 @@ describe('Conversation', () => {
         sessionUpdate: 'agent_message_chunk',
         content: { type: 'text', text: '' }
       });
-      expect(conversation.messages).toHaveLength(1);
-      expect(conversation.messages[0].content).toBe('hello');
+      expect(conversation.messages.value).toHaveLength(1);
+      expect(conversation.messages.value[0].content).toBe('hello');
     });
 
     it('agent_thought_chunk creates a think tool call', () => {
@@ -395,9 +384,9 @@ describe('Conversation', () => {
         content: { type: 'text', text: 'Starting interactive diff review' }
       });
 
-      expect(conversation.messages).toHaveLength(0);
-      expect(conversation.toolCalls.size).toBe(1);
-      const tc = [...conversation.toolCalls.values()][0];
+      expect(conversation.messages.value).toHaveLength(0);
+      expect(conversation.toolCalls.value.size).toBe(1);
+      const tc = [...conversation.toolCalls.value.values()][0];
       expect(tc.kind).toBe('think');
       expect(tc.status).toBe('in_progress');
       expect(tc.content[0]).toEqual({
@@ -420,8 +409,8 @@ describe('Conversation', () => {
         content: { type: 'text', text: ' a delve session.' }
       });
 
-      expect(conversation.toolCalls.size).toBe(1);
-      const tc = [...conversation.toolCalls.values()][0];
+      expect(conversation.toolCalls.value.size).toBe(1);
+      const tc = [...conversation.toolCalls.value.values()][0];
       expect(tc.content).toHaveLength(1);
       expect(tc.content[0]).toEqual({
         type: 'content',
@@ -439,10 +428,10 @@ describe('Conversation', () => {
         content: { type: 'text', text: 'Here is the answer.' }
       });
 
-      const tc = [...conversation.toolCalls.values()][0];
+      const tc = [...conversation.toolCalls.value.values()][0];
       expect(tc.status).toBe('completed');
-      expect(conversation.messages).toHaveLength(1);
-      expect(conversation.messages[0].content).toBe('Here is the answer.');
+      expect(conversation.messages.value).toHaveLength(1);
+      expect(conversation.messages.value[0].content).toBe('Here is the answer.');
     });
 
     it('whitespace-only text chunks do not create new messages', () => {
@@ -451,7 +440,7 @@ describe('Conversation', () => {
         content: { type: 'text', text: '\n\n' }
       });
 
-      expect(conversation.messages).toHaveLength(0);
+      expect(conversation.messages.value).toHaveLength(0);
     });
 
     it('trims leading newlines from agent message first chunk', () => {
@@ -460,8 +449,8 @@ describe('Conversation', () => {
         content: { type: 'text', text: '\n\nHello' }
       });
 
-      expect(conversation.messages).toHaveLength(1);
-      expect(conversation.messages[0].content).toBe('Hello');
+      expect(conversation.messages.value).toHaveLength(1);
+      expect(conversation.messages.value[0].content).toBe('Hello');
     });
 
     it('trims leading newlines across multiple initial chunks', () => {
@@ -478,8 +467,8 @@ describe('Conversation', () => {
         content: { type: 'text', text: 'Hello' }
       });
 
-      expect(conversation.messages).toHaveLength(1);
-      expect(conversation.messages[0].content).toBe('Hello');
+      expect(conversation.messages.value).toHaveLength(1);
+      expect(conversation.messages.value[0].content).toBe('Hello');
     });
 
     it('preserves newlines in the middle of agent messages', () => {
@@ -492,7 +481,7 @@ describe('Conversation', () => {
         content: { type: 'text', text: '\n\nWorld' }
       });
 
-      expect(conversation.messages[0].content).toBe('Hello\n\nWorld');
+      expect(conversation.messages.value[0].content).toBe('Hello\n\nWorld');
     });
 
     it('clear() resets everything', () => {
@@ -513,11 +502,11 @@ describe('Conversation', () => {
 
       conversation.clear();
 
-      expect(conversation.messages).toHaveLength(0);
-      expect(conversation.toolCalls.size).toBe(0);
-      expect(conversation.permissions).toHaveLength(0);
-      expect(conversation.plan).toBeNull();
-      expect(conversation.shellResults.size).toBe(0);
+      expect(conversation.messages.value).toHaveLength(0);
+      expect(conversation.toolCalls.value.size).toBe(0);
+      expect(conversation.permissions.value).toHaveLength(0);
+      expect(conversation.plan.value).toBeNull();
+      expect(conversation.shellResults.value.size).toBe(0);
     });
   });
 
@@ -529,7 +518,7 @@ describe('Conversation', () => {
         content: { type: 'text', text: 'Let me check...' }
       });
       // Timeline: [msg-0]
-      expect(conversation.timeline).toEqual([
+      expect(conversation.timeline.value).toEqual([
         { type: 'message', index: 0 }
       ]);
 
@@ -542,7 +531,7 @@ describe('Conversation', () => {
         status: 'pending'
       });
       // Timeline: [msg-0, toolCall-tc1]
-      expect(conversation.timeline).toEqual([
+      expect(conversation.timeline.value).toEqual([
         { type: 'message', index: 0 },
         { type: 'toolCall', toolCallId: 'tc1' }
       ]);
@@ -554,7 +543,7 @@ describe('Conversation', () => {
       });
       // Timeline should now be: [toolCall-tc1, msg-0]
       // The agent message moved to the bottom because it was most recently updated
-      expect(conversation.timeline).toEqual([
+      expect(conversation.timeline.value).toEqual([
         { type: 'toolCall', toolCallId: 'tc1' },
         { type: 'message', index: 0 }
       ]);
@@ -575,7 +564,7 @@ describe('Conversation', () => {
         content: { type: 'text', text: ' Done.' }
       });
 
-      expect(conversation.timeline).toEqual([
+      expect(conversation.timeline.value).toEqual([
         { type: 'permission', requestId: 1 },
         { type: 'message', index: 0 }
       ]);
@@ -592,7 +581,7 @@ describe('Conversation', () => {
       });
 
       // Should still be a single entry at the end — no movement needed
-      expect(conversation.timeline).toEqual([
+      expect(conversation.timeline.value).toEqual([
         { type: 'message', index: 0 }
       ]);
     });
@@ -624,7 +613,7 @@ describe('Conversation', () => {
       });
 
       // User message stays first, agent message moves after both tool calls
-      expect(conversation.timeline).toEqual([
+      expect(conversation.timeline.value).toEqual([
         { type: 'message', index: 0 },  // user
         { type: 'toolCall', toolCallId: 'tc1' },
         { type: 'toolCall', toolCallId: 'tc2' },
@@ -637,10 +626,10 @@ describe('Conversation', () => {
     it('addShellResult adds a shell entry to the timeline', () => {
       conversation.addShellResult('echo hello', 'hello\n', '', 0);
 
-      expect(conversation.shellResults.size).toBe(1);
-      const sr = conversation.shellResults.get(0);
+      expect(conversation.shellResults.value.size).toBe(1);
+      const sr = conversation.shellResults.value.get(0);
       expect(sr).toEqual({ id: 0, command: 'echo hello', stdout: 'hello\n', stderr: '', exitCode: 0 });
-      expect(conversation.timeline).toEqual([{ type: 'shell', id: 0 }]);
+      expect(conversation.timeline.value).toEqual([{ type: 'shell', id: 0 }]);
     });
 
     it('shell results appear inline with messages in timeline order', () => {
@@ -648,7 +637,7 @@ describe('Conversation', () => {
       conversation.addShellResult('echo hello', 'hello\n', '', 0);
       conversation.addUserMessage('next message');
 
-      expect(conversation.timeline).toEqual([
+      expect(conversation.timeline.value).toEqual([
         { type: 'message', index: 0 },
         { type: 'shell', id: 0 },
         { type: 'message', index: 1 },
@@ -659,29 +648,25 @@ describe('Conversation', () => {
       conversation.addShellResult('ls', 'file.txt\n', '', 0);
       conversation.clear();
 
-      expect(conversation.shellResults.size).toBe(0);
-      expect(conversation.timeline).toHaveLength(0);
+      expect(conversation.shellResults.value.size).toBe(0);
+      expect(conversation.timeline.value).toHaveLength(0);
     });
 
     it('shell IDs increment across multiple results', () => {
       conversation.addShellResult('cmd1', 'out1', '', 0);
       conversation.addShellResult('cmd2', 'out2', '', 1);
 
-      expect(conversation.shellResults.get(0)!.command).toBe('cmd1');
-      expect(conversation.shellResults.get(1)!.command).toBe('cmd2');
-      expect(conversation.timeline).toEqual([
+      expect(conversation.shellResults.value.get(0)!.command).toBe('cmd1');
+      expect(conversation.shellResults.value.get(1)!.command).toBe('cmd2');
+      expect(conversation.timeline.value).toEqual([
         { type: 'shell', id: 0 },
         { type: 'shell', id: 1 },
       ]);
     });
   });
 
-  describe('Notify batching', () => {
-    it('coalesces rapid notify() calls into a single listener invocation', async () => {
-      const listener = vi.fn();
-      conversation.onChange(listener);
-
-      // Fire 10 updates synchronously — should coalesce into 1 listener call
+  describe('Synchronous signal updates', () => {
+    it('rapid updates are all reflected synchronously in signal value', () => {
       for (let i = 0; i < 10; i++) {
         conversation.handleSessionUpdate({
           sessionUpdate: 'agent_message_chunk',
@@ -689,33 +674,24 @@ describe('Conversation', () => {
         });
       }
 
-      expect(listener).not.toHaveBeenCalled();
-
-      // Wait for the microtask to flush
-      await new Promise<void>((r) => queueMicrotask(r));
-
-      expect(listener).toHaveBeenCalledTimes(1);
+      expect(conversation.messages.value).toHaveLength(1);
+      expect(conversation.messages.value[0].content).toContain('word0');
+      expect(conversation.messages.value[0].content).toContain('word9');
     });
 
-    it('fires again for a second batch of updates', async () => {
-      const listener = vi.fn();
-      conversation.onChange(listener);
-
+    it('sequential updates accumulate correctly', () => {
       conversation.handleSessionUpdate({
         sessionUpdate: 'agent_message_chunk',
         content: { type: 'text', text: 'first batch' },
       });
-
-      await new Promise<void>((r) => queueMicrotask(r));
-      expect(listener).toHaveBeenCalledTimes(1);
+      expect(conversation.messages.value).toHaveLength(1);
+      expect(conversation.messages.value[0].content).toBe('first batch');
 
       conversation.handleSessionUpdate({
         sessionUpdate: 'agent_message_chunk',
         content: { type: 'text', text: ' second batch' },
       });
-
-      await new Promise<void>((r) => queueMicrotask(r));
-      expect(listener).toHaveBeenCalledTimes(2);
+      expect(conversation.messages.value[0].content).toBe('first batch second batch');
     });
   });
 });

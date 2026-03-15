@@ -1,5 +1,4 @@
 import { h } from 'preact';
-import { useState, useEffect } from 'preact/hooks';
 import type { PlanEntry } from '../../shared/acp-types.js';
 import { Conversation } from '../conversation.js';
 import { Icon } from './icon.js';
@@ -22,13 +21,7 @@ function PlanEntryRow({ entry }: { entry: PlanEntry }) {
 }
 
 export function PlanCard({ conversation }: { conversation: Conversation }) {
-  const [, setVersion] = useState(0);
-
-  useEffect(() => {
-    return conversation.onChange(() => setVersion((v) => v + 1));
-  }, [conversation]);
-
-  const plan = conversation.plan;
+  const plan = conversation.plan.value;
   if (!plan) return null;
 
   return (
