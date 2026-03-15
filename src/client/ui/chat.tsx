@@ -167,12 +167,17 @@ export function ChatList({
     (!lastMsg || lastMsg.role === 'user');
 
   // Auto-scroll: follow the conversation unless the user scrolled up.
-  // Track follow state via a scroll event listener rather than measuring
-  // gaps during render (which races with DOM updates).
+  // Track follow state via a scroll event listener. Use a guard to
+  // distinguish user scrolls from programmatic scrolls.
   const following = useRef(true);
+  const programmaticScroll = useRef(false);
 
   useEffect(() => {
     const onScroll = () => {
+      if (programmaticScroll.current) {
+        programmaticScroll.current = false;
+        return;
+      }
       const gap = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight;
       following.current = gap <= 50;
     };
@@ -182,6 +187,7 @@ export function ChatList({
 
   useEffect(() => {
     if (following.current) {
+      programmaticScroll.current = true;
       scrollContainer.scrollTop = scrollContainer.scrollHeight;
     }
   });

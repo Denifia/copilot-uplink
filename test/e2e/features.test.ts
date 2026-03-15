@@ -813,3 +813,21 @@ test('app layout uses flex column without position fixed', async ({ page }) => {
   expect(styles.display).toBe('flex');
   expect(styles.flexDirection).toBe('column');
 });
+
+test('auto-scroll follows conversation to bottom after streaming', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#send-btn')).toBeEnabled({ timeout: 10000 });
+
+  // Send a message that produces streaming chunks
+  await page.locator('#prompt-input').fill('stream please');
+  await page.locator('#send-btn').click();
+
+  // Wait for the agent to finish responding
+  await expect(page.locator('#send-btn')).toBeVisible({ timeout: 10000 });
+
+  // Chat area should be scrolled to the bottom (within 5px tolerance)
+  const gap = await page.locator('#chat-area').evaluate((el) => {
+    return el.scrollHeight - el.scrollTop - el.clientHeight;
+  });
+  expect(gap).toBeLessThanOrEqual(5);
+});
