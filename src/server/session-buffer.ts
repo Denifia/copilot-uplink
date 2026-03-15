@@ -91,6 +91,11 @@ export class SessionBuffer {
     return false;
   }
 
+  /** Check if a buffer exists for a session (no side effects). */
+  hasSession(sessionId: string): boolean {
+    return this.sessionBuffers.has(sessionId);
+  }
+
   /** Get replay data for a session. Returns null if no buffer exists. */
   replaySession(sessionId: string): { result: string; history: string[]; promptInProgress: boolean } | null {
     const buf = this.sessionBuffers.get(sessionId);

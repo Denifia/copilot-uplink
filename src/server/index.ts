@@ -10,6 +10,7 @@ import { homedir } from 'node:os';
 import type { SessionInfo } from '../shared/acp-types.js';
 import { DebugLog } from '../shared/debug-log.js';
 import { SessionBuffer } from './session-buffer.js';
+import { routeBridgeMessage, routeClientMessage } from './message-router.js';
 import createDebug from 'debug';
 
 /** Server-side debug log singleton. */
@@ -423,194 +424,209 @@ export function startServer(options: ServerOptions): ServerResult {
 
     // Bridge -> WebSocket (forward messages, intercept session/new and eager init)
     bridge.onMessage((line) => {
-      // Check if this is the eager init response (arrives here if client
-      // connected before bridge responded to the eager initialize)
-      if (handleEagerInitResponse(line)) return;
+      // Route through pure decision function
+      const action = routeBridgeMessage(line, {
+        eagerInitId: resolveEagerInit ? EAGER_INIT_ID : null,
+        pendingServerRpcIds: new Set(pendingServerRpcs.keys()),
+        wsOpen: ws.readyState === WebSocket.OPEN,
+      });
 
-      // Buffer session/update notifications for replay on reconnect
-      sessionBuffer.bufferUpdate(line);
-
-      // Intercept responses to server-originated RPCs (e.g. session/list)
-      if (pendingServerRpcs.size > 0) {
-        try {
-          const msg = JSON.parse(line);
-          if (msg.id != null && pendingServerRpcs.has(msg.id)) {
-            const rpc = pendingServerRpcs.get(msg.id)!;
-            pendingServerRpcs.delete(msg.id);
-            clearTimeout(rpc.timeout);
-            if (msg.error) rpc.reject(new Error(msg.error.message ?? 'RPC error'));
-            else rpc.resolve(msg.result);
-            return; // Don't forward server-internal responses to client
-          }
-        } catch { /* Not valid JSON - ignore malformed server RPC response */ }
-      }
-
-      // Track prompt completion even when the client is disconnected.
-      // This must run before the readyState guard so we don't lose track
-      // of prompt lifecycle when the WebSocket drops mid-prompt.
-      sessionBuffer.trackPromptCompletion(line);
-
-      if (ws.readyState !== WebSocket.OPEN) return;
-
-      // Capture session/new results (for replay buffer + in-memory listing)
-      if (pendingSessionNewIds.size > 0) {
-        try {
-          const msg = JSON.parse(line);
-          if (msg.id != null && pendingSessionNewIds.has(msg.id)) {
-            if (sessionBuffer.captureNewSession(msg.id, line, resolvedCwd)) {
-              pendingSessionNewIds.delete(msg.id);
-            }
-          }
-        } catch {
-          // Not valid JSON — ignore
+      switch (action.type) {
+        case 'eager_init_resolved':
+          cachedInitializeResponse = action.response;
+          log.timing('eager initialize complete');
+          resolveEagerInit?.(action.response);
+          resolveEagerInit = null;
+          rejectEagerInit = null;
+          return;
+        case 'eager_init_rejected':
+          rejectEagerInit?.(new Error(action.error));
+          resolveEagerInit = null;
+          rejectEagerInit = null;
+          return;
+        case 'server_rpc_resolved': {
+          const rpc = pendingServerRpcs.get(action.id)!;
+          pendingServerRpcs.delete(action.id);
+          clearTimeout(rpc.timeout);
+          rpc.resolve(action.result);
+          return;
         }
-      }
+        case 'server_rpc_rejected': {
+          const rpc = pendingServerRpcs.get(action.id)!;
+          pendingServerRpcs.delete(action.id);
+          clearTimeout(rpc.timeout);
+          rpc.reject(new Error(action.error));
+          return;
+        }
+        case 'drop':
+          // Buffer + track even when WS is closed
+          sessionBuffer.bufferUpdate(line);
+          sessionBuffer.trackPromptCompletion(line);
+          return;
+        case 'forward':
+          // Buffer session/update notifications for replay on reconnect
+          sessionBuffer.bufferUpdate(line);
+          // Track prompt completion before forwarding
+          sessionBuffer.trackPromptCompletion(line);
 
-      // Capture session/load results (for replay buffer)
-      if (pendingSessionLoadIds.size > 0) {
-        try {
-          const msg = JSON.parse(line);
-          if (msg.id != null && pendingSessionLoadIds.has(msg.id)) {
-            if (sessionBuffer.captureLoadSession(msg.id, line)) {
-              pendingSessionLoadIds.delete(msg.id);
+          // Capture session/new results (for replay buffer + in-memory listing)
+          if (pendingSessionNewIds.size > 0) {
+            try {
+              const msg = JSON.parse(line);
+              if (msg.id != null && pendingSessionNewIds.has(msg.id)) {
+                if (sessionBuffer.captureNewSession(msg.id, line, resolvedCwd)) {
+                  pendingSessionNewIds.delete(msg.id);
+                }
+              }
+            } catch {
+              // Not valid JSON — ignore
             }
           }
-        } catch { /* Not valid JSON - ignore malformed session/load response */ }
-      }
 
-      ws.send(line);
+          // Capture session/load results (for replay buffer)
+          if (pendingSessionLoadIds.size > 0) {
+            try {
+              const msg = JSON.parse(line);
+              if (msg.id != null && pendingSessionLoadIds.has(msg.id)) {
+                if (sessionBuffer.captureLoadSession(msg.id, line)) {
+                  pendingSessionLoadIds.delete(msg.id);
+                }
+              }
+            } catch { /* Not valid JSON - ignore malformed session/load response */ }
+          }
+
+          ws.send(line);
+          return;
+      }
     });
 
     // WebSocket -> Bridge (with uplink-specific message interception)
     ws.on('message', (message) => {
       const raw = message.toString();
-      let parsed: { jsonrpc?: string; id?: number | string; method?: string; params?: { command?: string; model?: string; sessionId?: string; summary?: string; skipReplay?: boolean } } | undefined;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        // Not valid JSON — forward as-is
-      }
+      const action = routeClientMessage(raw, {
+        cachedInitializeResponse,
+        hasInitializePromise: !!initializePromise,
+        sessionBuffer,
+        cwd: resolvedCwd,
+      });
 
-      if (parsed?.method === 'uplink/shell') {
-        handleShellCommand(ws, parsed.id, parsed.params?.command, resolvedCwd);
-        return;
-      }
+      switch (action.type) {
+        case 'shell':
+          handleShellCommand(ws, action.id, action.command, resolvedCwd);
+          return;
 
-      if (parsed?.method === 'uplink/clear_history') {
-        const sid = parsed.params?.sessionId;
-        if (sid) {
-          sessionBuffer.clearHistory(sid);
-        }
-        if (parsed.id !== undefined) {
-          ws.send(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, result: { ok: true } }));
-        }
-        return;
-      }
+        case 'clear_history':
+          sessionBuffer.clearHistory(action.sessionId);
+          if (action.id !== undefined) {
+            ws.send(JSON.stringify({ jsonrpc: '2.0', id: action.id, result: { ok: true } }));
+          }
+          return;
 
-      if (parsed?.method === 'uplink/rename_session') {
-        const { sessionId, summary } = parsed.params ?? {};
-        if (parsed.id !== undefined && sessionId && summary) {
-          // Write summary to CLI's workspace.yaml so it persists across restarts
-          const wsYamlPath = path.join(homedir(), '.copilot', 'session-state', sessionId, 'workspace.yaml');
+        case 'rename_session': {
+          const wsYamlPath = path.join(homedir(), '.copilot', 'session-state', action.sessionId, 'workspace.yaml');
           try {
             if (existsSync(wsYamlPath)) {
               let yaml = readFileSync(wsYamlPath, 'utf8');
-              // Replace existing summary line or append one
               if (/^summary:\s/m.test(yaml)) {
-                yaml = yaml.replace(/^summary:\s.*$/m, `summary: ${summary}`);
+                yaml = yaml.replace(/^summary:\s.*$/m, `summary: ${action.summary}`);
               } else {
-                yaml = yaml.trimEnd() + `\nsummary: ${summary}\n`;
+                yaml = yaml.trimEnd() + `\nsummary: ${action.summary}\n`;
               }
               writeFileSync(wsYamlPath, yaml);
             }
           } catch (err) {
             log.session('failed to write workspace.yaml for rename: %O', err);
           }
-          // Also update in-memory supplement
-          sessionBuffer.updateSessionTitle(sessionId, summary);
-          ws.send(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, result: { ok: true } }));
-        } else if (parsed.id !== undefined) {
-          ws.send(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, error: { code: -32602, message: 'Missing sessionId or summary' } }));
+          sessionBuffer.updateSessionTitle(action.sessionId, action.summary);
+          ws.send(JSON.stringify({ jsonrpc: '2.0', id: action.id, result: { ok: true } }));
+          return;
         }
-        return;
-      }
 
-      // Intercept initialize — await eager init result (already done or in-flight)
-      if (parsed?.method === 'initialize' && parsed.id != null) {
-        const clientId = parsed.id;
-        if (cachedInitializeResponse) {
+        case 'rename_session_error':
+          ws.send(JSON.stringify({ jsonrpc: '2.0', id: action.id, error: { code: -32602, message: action.message } }));
+          return;
+
+        case 'initialize_cached':
           log.timing('initialize: cached (0ms)');
-          ws.send(JSON.stringify({ jsonrpc: '2.0', id: clientId, result: JSON.parse(cachedInitializeResponse) }));
-        } else if (initializePromise) {
+          ws.send(JSON.stringify({ jsonrpc: '2.0', id: action.id, result: JSON.parse(action.response) }));
+          return;
+
+        case 'initialize_pending':
           log.timing('initialize: awaiting eager init...');
-          initializePromise.then((cached) => {
+          initializePromise!.then((cached) => {
             if (ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ jsonrpc: '2.0', id: clientId, result: JSON.parse(cached) }));
+              ws.send(JSON.stringify({ jsonrpc: '2.0', id: action.id, result: JSON.parse(cached) }));
             }
           }).catch((err) => {
             if (ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ jsonrpc: '2.0', id: clientId, error: { code: -32603, message: err.message } }));
+              ws.send(JSON.stringify({ jsonrpc: '2.0', id: action.id, error: { code: -32603, message: err.message } }));
             }
           });
-        } else {
-          // No bridge, no promise — shouldn't happen but handle gracefully
-          ws.send(JSON.stringify({ jsonrpc: '2.0', id: clientId, error: { code: -32603, message: 'Bridge not available' } }));
-        }
-        return;
-      }
+          return;
 
-      // Track session/new requests to record the session for history
-      if (parsed?.method === 'session/new' && parsed.id != null) {
-        pendingSessionNewIds.add(parsed.id);
-      }
+        case 'initialize_error':
+          ws.send(JSON.stringify({ jsonrpc: '2.0', id: action.id, error: { code: -32603, message: action.message } }));
+          return;
 
-      // Intercept session/load — replay from buffer if we have one
-      if (parsed?.method === 'session/load' && parsed.id != null) {
-        const requestedId = parsed.params?.sessionId;
-        if (requestedId) {
-          const replay = sessionBuffer.replaySession(requestedId);
-          if (replay) {
-            // We have a buffer for this session — replay it instead of asking the CLI
-            const replayResult = JSON.parse(replay.result);
-            if (replay.promptInProgress) {
-              replayResult.promptInProgress = true;
+        case 'session_load_replay': {
+          const replay = sessionBuffer.replaySession(action.sessionId);
+          if (!replay) {
+            // Race: buffer disappeared between route and execute - forward instead
+            serverDebugLog.append('proto', 'session_load_forwarded', { sessionId: action.sessionId });
+            sessionBuffer.activeSessionId = action.sessionId;
+            pendingSessionLoadIds.add(action.id);
+            if (activeBridge === bridge) {
+              bridge.send(raw);
             }
-            const skipReplay = !!parsed.params?.skipReplay;
-            serverDebugLog.append('proto', 'session_load_intercepted', {
-              sessionId: requestedId,
-              skipReplay,
-              historyLength: replay.history.length,
-              promptInProgress: replay.promptInProgress,
-            });
-            ws.send(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, result: replayResult }));
-            if (!skipReplay) {
-              for (const line of replay.history) {
-                ws.send(line);
-              }
-            }
-            return; // Don't forward to bridge
+            return;
           }
-          // No buffer — forward to CLI and start tracking
-          serverDebugLog.append('proto', 'session_load_forwarded', { sessionId: requestedId });
-          sessionBuffer.activeSessionId = requestedId;
-          pendingSessionLoadIds.add(parsed.id);
+          const replayResult = JSON.parse(replay.result);
+          if (replay.promptInProgress) {
+            replayResult.promptInProgress = true;
+          }
+          let skipReplay = false;
+          try {
+            const parsed = JSON.parse(raw);
+            skipReplay = !!parsed.params?.skipReplay;
+          } catch { /* ignore */ }
+          serverDebugLog.append('proto', 'session_load_intercepted', {
+            sessionId: action.sessionId,
+            skipReplay,
+            historyLength: replay.history.length,
+            promptInProgress: replay.promptInProgress,
+          });
+          ws.send(JSON.stringify({ jsonrpc: '2.0', id: action.id, result: replayResult }));
+          if (!skipReplay) {
+            for (const line of replay.history) {
+              ws.send(line);
+            }
+          }
+          return;
         }
-      }
 
-      // Buffer outgoing prompts as user_message_chunk so replay includes user messages
-      if (parsed?.method === 'session/prompt' && sessionBuffer.activeSessionId) {
-        const promptParams = parsed.params as { sessionId?: string; prompt?: Array<{ type: string; text?: string }> } | undefined;
-        const sid = promptParams?.sessionId;
-        if (sid && parsed.id != null && promptParams?.prompt) {
-          sessionBuffer.trackPrompt(parsed.id, sid, promptParams.prompt);
-        } else if (sid && parsed.id != null) {
-          // Track even without prompt content (sets activePromptRequestId)
-          sessionBuffer.trackPrompt(parsed.id, sid, []);
-        }
-      }
+        case 'session_load_forward':
+          serverDebugLog.append('proto', 'session_load_forwarded', { sessionId: action.sessionId });
+          sessionBuffer.activeSessionId = action.sessionId;
+          pendingSessionLoadIds.add(action.id);
+          if (activeBridge === bridge) {
+            bridge.send(raw);
+          }
+          return;
 
-      if (activeBridge === bridge) {
-        bridge.send(raw);
+        case 'forward':
+          if (action.trackSessionNew != null) {
+            pendingSessionNewIds.add(action.trackSessionNew);
+          }
+          if (action.trackPrompt) {
+            sessionBuffer.trackPrompt(action.trackPrompt.id, action.trackPrompt.sessionId, action.trackPrompt.prompt);
+          }
+          if (activeBridge === bridge) {
+            bridge.send(raw);
+          }
+          return;
+
+        case 'noop':
+          return;
       }
     });
 
