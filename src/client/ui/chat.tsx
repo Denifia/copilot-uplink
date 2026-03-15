@@ -165,15 +165,20 @@ export function ChatList({
     return conversation.onChange(() => setVersion((v) => v + 1));
   }, [conversation]);
 
-  // Auto-scroll on message changes
-  useEffect(() => {
-    scrollContainer.scrollTop = scrollContainer.scrollHeight;
-  });
-
   // Show thinking indicator when prompting but no agent response yet
   const lastMsg = conversation.messages[conversation.messages.length - 1];
   const showThinking = conversation.isPrompting &&
     (!lastMsg || lastMsg.role === 'user');
+
+  // Auto-scroll only when the user is "following" the conversation (near the bottom).
+  // If they've scrolled up to read, leave them alone.
+  const FOLLOW_THRESHOLD = 50; // px from bottom to count as "following"
+  useEffect(() => {
+    const gap = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight;
+    if (gap <= FOLLOW_THRESHOLD) {
+      scrollContainer.scrollTop = scrollContainer.scrollHeight;
+    }
+  });
 
   return (
     <>
