@@ -585,7 +585,7 @@ describe('Conversation', () => {
   });
 
   describe('Timeline ordering — most recently updated item closest to bottom', () => {
-    it('agent message moves below tool call when text continues after tool call', () => {
+    it('agent text after tool call creates new bubble instead of appending', () => {
       // 1. Agent starts streaming
       conversation.handleSessionUpdate({
         sessionUpdate: 'agent_message_chunk',
@@ -613,17 +613,20 @@ describe('Conversation', () => {
       // 3. Agent continues streaming after tool call
       conversation.handleSessionUpdate({
         sessionUpdate: 'agent_message_chunk',
-        content: { type: 'text', text: ' Here are the results.' }
+        content: { type: 'text', text: 'Here are the results.' }
       });
-      // Timeline should now be: [toolCall-tc1, msg-0]
-      // The agent message moved to the bottom because it was most recently updated
+      // New bubble created after tool call - old message stays in place
+      expect(conversation.messages.value).toHaveLength(2);
+      expect(conversation.messages.value[0].content).toBe('Let me check...');
+      expect(conversation.messages.value[1].content).toBe('Here are the results.');
       expect(conversation.timeline.value).toEqual([
+        { type: 'message', index: 0 },
         { type: 'toolCall', toolCallId: 'tc1' },
-        { type: 'message', index: 0 }
+        { type: 'message', index: 1 }
       ]);
     });
 
-    it('agent message moves below permission when text continues', () => {
+    it('agent text after permission creates new bubble instead of appending', () => {
       conversation.handleSessionUpdate({
         sessionUpdate: 'agent_message_chunk',
         content: { type: 'text', text: 'I need to...' }
@@ -632,15 +635,19 @@ describe('Conversation', () => {
         { optionId: 'yes', name: 'Yes', kind: 'allow_once' }
       ]);
 
-      // Agent resumes
+      // Agent resumes - should create new bubble
       conversation.handleSessionUpdate({
         sessionUpdate: 'agent_message_chunk',
-        content: { type: 'text', text: ' Done.' }
+        content: { type: 'text', text: 'Done.' }
       });
 
+      expect(conversation.messages.value).toHaveLength(2);
+      expect(conversation.messages.value[0].content).toBe('I need to...');
+      expect(conversation.messages.value[1].content).toBe('Done.');
       expect(conversation.timeline.value).toEqual([
+        { type: 'message', index: 0 },
         { type: 'permission', requestId: 1 },
-        { type: 'message', index: 0 }
+        { type: 'message', index: 1 }
       ]);
     });
 
@@ -660,7 +667,7 @@ describe('Conversation', () => {
       ]);
     });
 
-    it('multiple tool calls interleaved with message', () => {
+    it('multiple tool calls interleaved with message creates new bubble', () => {
       conversation.addUserMessage('hello');
       conversation.handleSessionUpdate({
         sessionUpdate: 'agent_message_chunk',
@@ -680,18 +687,23 @@ describe('Conversation', () => {
         kind: 'edit',
         status: 'pending'
       });
-      // Agent resumes text
+      // Agent resumes text - should create new bubble
       conversation.handleSessionUpdate({
         sessionUpdate: 'agent_message_chunk',
-        content: { type: 'text', text: ' All done.' }
+        content: { type: 'text', text: 'All done.' }
       });
 
-      // User message stays first, agent message moves after both tool calls
+      expect(conversation.messages.value).toHaveLength(3);
+      expect(conversation.messages.value[0].content).toBe('hello');
+      expect(conversation.messages.value[1].content).toBe('Checking...');
+      expect(conversation.messages.value[2].content).toBe('All done.');
+      // User message, agent msg, tool calls, new agent msg
       expect(conversation.timeline.value).toEqual([
         { type: 'message', index: 0 },  // user
+        { type: 'message', index: 1 },  // agent first bubble
         { type: 'toolCall', toolCallId: 'tc1' },
         { type: 'toolCall', toolCallId: 'tc2' },
-        { type: 'message', index: 1 }   // agent (moved to end)
+        { type: 'message', index: 2 }   // agent new bubble
       ]);
     });
   });

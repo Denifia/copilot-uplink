@@ -244,30 +244,21 @@ export class Conversation {
 
   // ─── Private helpers ──────────────────────────────────────────────
 
-  /** Move a timeline entry matching `predicate` to the end. */
-  private moveToEnd(predicate: (e: TimelineEntry) => boolean): void {
-    const tl = this._timeline.value;
-    const idx = tl.findIndex(predicate);
-    if (idx >= 0 && idx < tl.length - 1) {
-      const newTl = [...tl];
-      const [entry] = newTl.splice(idx, 1);
-      newTl.push(entry);
-      this._timeline.value = newTl;
-    }
-  }
-
   private appendAgentText(text: string): void {
     const msgs = this._messages.value;
     const last = msgs[msgs.length - 1];
-    if (last?.role === "agent") {
+    const lastMsgIndex = msgs.length - 1;
+    const tl = this._timeline.value;
+    const lastTimelineIsThisMessage = last?.role === "agent"
+      && tl.length > 0
+      && tl[tl.length - 1].type === "message"
+      && (tl[tl.length - 1] as { index: number }).index === lastMsgIndex;
+
+    if (last?.role === "agent" && lastTimelineIsThisMessage) {
       const newContent = !last.content.trim()
         ? (last.content + text).trimStart()
         : last.content + text;
-      batch(() => {
-        this._messages.value = [...msgs.slice(0, -1), { ...last, content: newContent }];
-        const msgIndex = this._messages.value.length - 1;
-        this.moveToEnd((e) => e.type === "message" && e.index === msgIndex);
-      });
+      this._messages.value = [...msgs.slice(0, -1), { ...last, content: newContent }];
     } else if (text.trim()) {
       batch(() => {
         this._messages.value = [...msgs, { role: "agent", content: text.trimStart(), timestamp: Date.now() }];
@@ -279,12 +270,15 @@ export class Conversation {
   private appendUserText(text: string): void {
     const msgs = this._messages.value;
     const last = msgs[msgs.length - 1];
-    if (last?.role === "user") {
-      batch(() => {
-        this._messages.value = [...msgs.slice(0, -1), { ...last, content: last.content + text }];
-        const msgIndex = this._messages.value.length - 1;
-        this.moveToEnd((e) => e.type === "message" && e.index === msgIndex);
-      });
+    const lastMsgIndex = msgs.length - 1;
+    const tl = this._timeline.value;
+    const lastTimelineIsThisMessage = last?.role === "user"
+      && tl.length > 0
+      && tl[tl.length - 1].type === "message"
+      && (tl[tl.length - 1] as { index: number }).index === lastMsgIndex;
+
+    if (last?.role === "user" && lastTimelineIsThisMessage) {
+      this._messages.value = [...msgs.slice(0, -1), { ...last, content: last.content + text }];
     } else if (text) {
       batch(() => {
         this._messages.value = [...msgs, { role: "user", content: text, timestamp: Date.now() }];
