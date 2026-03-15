@@ -16,7 +16,7 @@ export interface PromptControllerDeps {
   setMode: (mode: AgentMode) => void;
   yoloMode: () => boolean;
   setYoloMode: (on: boolean) => void;
-  modelLabel: HTMLElement;
+  setModelLabel: (name: string) => void;
   applyTheme: (theme: string) => void;
 }
 
@@ -31,7 +31,7 @@ function clearConversation(conversation: Conversation): void {
 
 /** Handle the full prompt flow: shell commands, slash commands, mode prefixing, autopilot loop. */
 export async function handleSend(text: string, deps: PromptControllerDeps): Promise<void> {
-  const { client, conversation, getMode, modelLabel } = deps;
+  const { client, conversation, getMode } = deps;
 
   // Shell commands: !<command>
   if (text.startsWith('!')) {
@@ -66,8 +66,7 @@ export async function handleSend(text: string, deps: PromptControllerDeps): Prom
     } else if (parsed.command === '/model' && parsed.arg) {
       const name = findModelName(parsed.arg);
       if (name) {
-        modelLabel.textContent = name;
-        modelLabel.hidden = false;
+        deps.setModelLabel(name);
       }
     }
   }
