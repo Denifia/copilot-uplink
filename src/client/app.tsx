@@ -197,9 +197,6 @@ export function App() {
   // ─── Connection status ──────────────────────────────────────────────
   function updateConnectionStatus(state: ConnectionState): void {
     connectionState.value = state;
-    if (state === 'initializing' && conversation.timeline.value.length > 0) {
-      conversation.clear();
-    }
     conversation.prompting = state === 'prompting';
   }
 
@@ -256,6 +253,7 @@ export function App() {
           );
         },
         onError: (error) => console.error('ACP error:', error),
+        onClearConversation: () => conversation.clear(),
       });
     }
 

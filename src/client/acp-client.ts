@@ -78,6 +78,8 @@ export interface AcpClientOptions {
     respond: (outcome: PermissionOutcome) => void,
   ) => void;
   onError?: (error: Error) => void;
+  /** Called when the conversation should be cleared (new or different session). */
+  onClearConversation?: () => void;
 }
 
 export type {
@@ -92,6 +94,7 @@ export class AcpClient {
   private state: ConnectionState = "disconnected";
   private ws?: WebSocket;
   private sessionId?: string;
+  private previousSessionId?: string;
   private shouldReconnect = false;
   private reconnectAttempts = 0;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
@@ -303,13 +306,23 @@ export class AcpClient {
     // Try to resume a saved session (e.g., after page reload)
     const resumeId = this.storage.getItem(StorageKeys.RESUME_SESSION);
     if (resumeId && this.agentCapabilities.loadSession) {
+      const isSameSession = resumeId === this.previousSessionId;
       try {
-        const tLoad = performance.now();
-        const loadResult = await this.sendRequest<SessionNewResult>("session/load", {
+        // If reconnecting to the same session, tell the server to skip
+        // replaying history - the client already has the conversation.
+        const loadParams: Record<string, unknown> = {
           sessionId: resumeId,
           cwd: this.options.cwd,
           mcpServers: [],
-        });
+        };
+        if (isSameSession) {
+          loadParams.skipReplay = true;
+        } else {
+          this.clearConversation();
+        }
+
+        const tLoad = performance.now();
+        const loadResult = await this.sendRequest<SessionNewResult>("session/load", loadParams);
         console.debug(`[timing] session/load: ${(performance.now() - tLoad).toFixed(0)}ms`);
         console.debug(`[timing] total initializeSession: ${(performance.now() - t0).toFixed(0)}ms`);
         this.sessionId = loadResult.sessionId ?? resumeId;
@@ -329,6 +342,8 @@ export class AcpClient {
         this.storage.removeItem(StorageKeys.RESUME_SESSION);
       }
     }
+
+    this.clearConversation();
 
     const tNew = performance.now();
     const result = await this.sendRequest<SessionNewResult>(
@@ -358,7 +373,16 @@ export class AcpClient {
     }
   }
 
+  private clearConversation(): void {
+    try {
+      this.options.onClearConversation?.();
+    } catch (err) {
+      console.error("Error in onClearConversation callback:", err);
+    }
+  }
+
   private handleClose(): void {
+    this.previousSessionId = this.sessionId;
     this.ws = undefined;
     this.sessionId = undefined;
     this.rejectAllPendingRequests(new Error("Connection closed"));

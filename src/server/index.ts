@@ -562,8 +562,10 @@ export function startServer(options: ServerOptions): ServerResult {
               replayResult.promptInProgress = true;
             }
             ws.send(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, result: replayResult }));
-            for (const line of replay.history) {
-              ws.send(line);
+            if (!parsed.params?.skipReplay) {
+              for (const line of replay.history) {
+                ws.send(line);
+              }
             }
             return; // Don't forward to bridge
           }
