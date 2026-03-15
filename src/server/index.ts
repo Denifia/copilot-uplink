@@ -484,7 +484,7 @@ export function startServer(options: ServerOptions): ServerResult {
     // WebSocket -> Bridge (with uplink-specific message interception)
     ws.on('message', (message) => {
       const raw = message.toString();
-      let parsed: { jsonrpc?: string; id?: number | string; method?: string; params?: { command?: string; model?: string; sessionId?: string; summary?: string } } | undefined;
+      let parsed: { jsonrpc?: string; id?: number | string; method?: string; params?: { command?: string; model?: string; sessionId?: string; summary?: string; skipReplay?: boolean } } | undefined;
       try {
         parsed = JSON.parse(raw);
       } catch {
