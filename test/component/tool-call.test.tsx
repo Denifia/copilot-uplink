@@ -1,8 +1,11 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { render, cleanup, fireEvent } from '@testing-library/preact';
+import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { render, cleanup, fireEvent, screen } from '@testing-library/preact';
 import { h } from 'preact';
+import { signal } from '@preact/signals';
 import { ToolCallCard } from '../../src/client/ui/tool-call.js';
-import type { TrackedToolCall } from '../../src/client/conversation.js';
+import type { TrackedToolCall, Conversation } from '../../src/client/conversation.js';
+import type { ActiveRequest } from '../../src/client/ui/permission.js';
+import type { PermissionOutcome } from '../../src/shared/acp-types.js';
 
 afterEach(cleanup);
 
@@ -127,5 +130,63 @@ describe('ToolCallCard', () => {
       const { container } = render(<ToolCallCard tc={tc} />);
       expect(container.querySelector('.kind-icon')!.textContent).toBe(icon);
     }
+  });
+
+  describe('inline permission', () => {
+    function makePermReq(overrides: Partial<ActiveRequest> = {}): ActiveRequest {
+      return {
+        requestId: 1,
+        title: 'Run command',
+        options: [
+          { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
+          { optionId: 'reject-once', name: 'Deny', kind: 'reject_once' },
+        ],
+        respond: () => {},
+        resolved: signal(false),
+        selectedOptionId: signal(undefined),
+        ...overrides,
+      };
+    }
+
+    it('shows warning border when permission is pending', () => {
+      const tc = makeTc({ kind: 'execute', status: 'pending' });
+      const { container } = render(<ToolCallCard tc={tc} permissionRequest={makePermReq()} />);
+      expect(container.querySelector('.tool-call.awaiting-permission')).toBeTruthy();
+    });
+
+    it('shows approve/deny buttons inline', () => {
+      const tc = makeTc({ kind: 'execute', status: 'pending' });
+      render(<ToolCallCard tc={tc} permissionRequest={makePermReq()} />);
+      expect(screen.getByText('Allow once')).toBeTruthy();
+      expect(screen.getByText('Deny')).toBeTruthy();
+    });
+
+    it('shows prompt message when awaiting permission', () => {
+      const tc = makeTc({ kind: 'execute', status: 'pending' });
+      render(<ToolCallCard tc={tc} permissionRequest={makePermReq()} />);
+      expect(screen.getByText('Copilot wants to perform this action. Allow?')).toBeTruthy();
+    });
+
+    it('hides buttons and prompt after approval', () => {
+      const tc = makeTc({ kind: 'execute', status: 'pending' });
+      const req = makePermReq({ resolved: signal(true), selectedOptionId: signal('allow-once') });
+      const { container } = render(<ToolCallCard tc={tc} permissionRequest={req} />);
+      expect(container.querySelector('.permission-actions')).toBeNull();
+      expect(container.querySelector('.permission-message')).toBeNull();
+    });
+
+    it('no warning border or permission UI without permissionRequest', () => {
+      const tc = makeTc({ kind: 'execute', status: 'pending' });
+      const { container } = render(<ToolCallCard tc={tc} />);
+      expect(container.querySelector('.awaiting-permission')).toBeNull();
+      expect(container.querySelector('.permission-actions')).toBeNull();
+    });
+
+    it('shows "Permission denied" text when denied', () => {
+      const tc = makeTc({ kind: 'execute', status: 'failed' });
+      const req = makePermReq({ resolved: signal(true), selectedOptionId: signal('reject-once') });
+      const { container } = render(<ToolCallCard tc={tc} permissionRequest={req} />);
+      expect(container.textContent).toContain('Permission denied');
+    });
   });
 });
