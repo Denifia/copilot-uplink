@@ -172,10 +172,16 @@ export function ChatList({
 
   // Auto-scroll only when the user is "following" the conversation (near the bottom).
   // If they've scrolled up to read, leave them alone.
+  // We check the gap BEFORE render (captured in a ref) because after render the new
+  // content has already increased scrollHeight, making the gap appear large.
   const FOLLOW_THRESHOLD = 50; // px from bottom to count as "following"
+  const wasFollowing = useRef(true);
+  // Capture follow state before each render via a layout-time check
+  const gap = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight;
+  wasFollowing.current = gap <= FOLLOW_THRESHOLD;
+
   useEffect(() => {
-    const gap = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight;
-    if (gap <= FOLLOW_THRESHOLD) {
+    if (wasFollowing.current) {
       scrollContainer.scrollTop = scrollContainer.scrollHeight;
     }
   });
