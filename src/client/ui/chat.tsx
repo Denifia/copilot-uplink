@@ -166,14 +166,22 @@ export function ChatList({
   const showThinking = conversation.isPrompting.value &&
     (!lastMsg || lastMsg.role === 'user');
 
-  // Auto-scroll only when the user is "following" the conversation (near the bottom).
-  const FOLLOW_THRESHOLD = 50;
-  const wasFollowing = useRef(true);
-  const gap = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight;
-  wasFollowing.current = gap <= FOLLOW_THRESHOLD;
+  // Auto-scroll: follow the conversation unless the user scrolled up.
+  // Track follow state via a scroll event listener rather than measuring
+  // gaps during render (which races with DOM updates).
+  const following = useRef(true);
 
   useEffect(() => {
-    if (wasFollowing.current) {
+    const onScroll = () => {
+      const gap = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight;
+      following.current = gap <= 50;
+    };
+    scrollContainer.addEventListener('scroll', onScroll, { passive: true });
+    return () => scrollContainer.removeEventListener('scroll', onScroll);
+  }, [scrollContainer]);
+
+  useEffect(() => {
+    if (following.current) {
       scrollContainer.scrollTop = scrollContainer.scrollHeight;
     }
   });
