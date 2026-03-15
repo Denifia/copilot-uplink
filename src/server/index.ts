@@ -8,6 +8,7 @@ import { Bridge, type BridgeOptions } from './bridge.js';
 import path from 'node:path';
 import { homedir } from 'node:os';
 import type { SessionInfo } from '../shared/acp-types.js';
+import { SessionBuffer } from './session-buffer.js';
 import createDebug from 'debug';
 
 const log = {
@@ -138,8 +139,8 @@ export function startServer(options: ServerOptions): ServerResult {
 
     // Merge with in-memory supplement (sessions created this bridge lifetime)
     const cliIds = new Set(cliSessions.map(s => s.id));
-    const supplement = [...recentSessions.values()]
-      .filter(s => s.cwd === cwd && !cliIds.has(s.id));
+    const supplement = sessionBuffer.listSessions(cwd)
+      .filter(s => !cliIds.has(s.id));
 
     const merged = [...cliSessions, ...supplement]
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
@@ -178,18 +179,7 @@ export function startServer(options: ServerOptions): ServerResult {
   // Session replay buffer — remembers session history so we can replay it
   // when a client reconnects and session/load returns "already loaded".
   // Keyed by session ID; survives session switches within the same bridge.
-  let activeSessionId: string | null = null;
-  const sessionBuffers = new Map<string, {
-    result: string;
-    history: string[];
-    /** JSON-RPC ID of the in-flight session/prompt (set when forwarded to bridge, cleared on response). */
-    activePromptRequestId?: number | string;
-  }>();
-
-  // In-memory supplement for session listing. Tracks sessions created during
-  // this bridge's lifetime because the CLI's session/list doesn't index them
-  // until the next CLI process restart.
-  const recentSessions = new Map<string, SessionInfo>();
+  const sessionBuffer = new SessionBuffer(resolvedCwd);
 
   /** Internal request ID counter for server-originated RPC calls to the bridge. */
   let serverRpcId = 100_000;
@@ -250,9 +240,7 @@ export function startServer(options: ServerOptions): ServerResult {
         resolveEagerInit = null;
         rejectEagerInit = null;
         // Clear session buffers — sessions are gone with the bridge
-        activeSessionId = null;
-        sessionBuffers.clear();
-        recentSessions.clear();
+        sessionBuffer.reset();
       }
     });
 
@@ -426,16 +414,7 @@ export function startServer(options: ServerOptions): ServerResult {
       if (handleEagerInitResponse(line)) return;
 
       // Buffer session/update notifications for replay on reconnect
-      if (activeSessionId && line.includes('"session/update"')) {
-        try {
-          const msg = JSON.parse(line);
-          if (msg.method === 'session/update') {
-            const sid = msg.params?.sessionId;
-            const buf = sid ? sessionBuffers.get(sid) : undefined;
-            if (buf) buf.history.push(line);
-          }
-        } catch { /* ignore */ }
-      }
+      sessionBuffer.bufferUpdate(line);
 
       // Intercept responses to server-originated RPCs (e.g. session/list)
       if (pendingServerRpcs.size > 0) {
@@ -455,17 +434,7 @@ export function startServer(options: ServerOptions): ServerResult {
       // Track prompt completion even when the client is disconnected.
       // This must run before the readyState guard so we don't lose track
       // of prompt lifecycle when the WebSocket drops mid-prompt.
-      if (activeSessionId) {
-        try {
-          const msg = JSON.parse(line);
-          if (msg.id != null) {
-            const buf = sessionBuffers.get(activeSessionId);
-            if (buf?.activePromptRequestId != null && msg.id === buf.activePromptRequestId) {
-              buf.activePromptRequestId = undefined;
-            }
-          }
-        } catch { /* ignore */ }
-      }
+      sessionBuffer.trackPromptCompletion(line);
 
       if (ws.readyState !== WebSocket.OPEN) return;
 
@@ -473,18 +442,10 @@ export function startServer(options: ServerOptions): ServerResult {
       if (pendingSessionNewIds.size > 0) {
         try {
           const msg = JSON.parse(line);
-          if (msg.id != null && pendingSessionNewIds.has(msg.id) && msg.result?.sessionId) {
-            pendingSessionNewIds.delete(msg.id);
-            const newSid = msg.result.sessionId;
-            activeSessionId = newSid;
-            sessionBuffers.set(newSid, { result: JSON.stringify(msg.result), history: [] });
-            // Track in-memory for session listing (CLI won't index until restart)
-            recentSessions.set(newSid, {
-              id: newSid,
-              cwd: resolvedCwd,
-              title: null,
-              updatedAt: new Date().toISOString(),
-            });
+          if (msg.id != null && pendingSessionNewIds.has(msg.id)) {
+            if (sessionBuffer.captureNewSession(msg.id, line, resolvedCwd)) {
+              pendingSessionNewIds.delete(msg.id);
+            }
           }
         } catch {
           // Not valid JSON — ignore
@@ -495,13 +456,9 @@ export function startServer(options: ServerOptions): ServerResult {
       if (pendingSessionLoadIds.size > 0) {
         try {
           const msg = JSON.parse(line);
-          if (msg.id != null && pendingSessionLoadIds.has(msg.id) && msg.result) {
-            pendingSessionLoadIds.delete(msg.id);
-            // session/load succeeded — the bridge replayed history as notifications
-            // (which we already buffered above). Save the result for future replays.
-            if (activeSessionId) {
-              const buf = sessionBuffers.get(activeSessionId);
-              if (buf) buf.result = JSON.stringify(msg.result);
+          if (msg.id != null && pendingSessionLoadIds.has(msg.id)) {
+            if (sessionBuffer.captureLoadSession(msg.id, line)) {
+              pendingSessionLoadIds.delete(msg.id);
             }
           }
         } catch { /* ignore */ }
@@ -528,8 +485,7 @@ export function startServer(options: ServerOptions): ServerResult {
       if (parsed?.method === 'uplink/clear_history') {
         const sid = parsed.params?.sessionId;
         if (sid) {
-          const buf = sessionBuffers.get(sid);
-          if (buf) buf.history = [];
+          sessionBuffer.clearHistory(sid);
         }
         if (parsed.id !== undefined) {
           ws.send(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, result: { ok: true } }));
@@ -557,8 +513,7 @@ export function startServer(options: ServerOptions): ServerResult {
             log.session('failed to write workspace.yaml for rename: %O', err);
           }
           // Also update in-memory supplement
-          const info = recentSessions.get(sessionId);
-          if (info) info.title = summary;
+          sessionBuffer.updateSessionTitle(sessionId, summary);
           ws.send(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, result: { ok: true } }));
         } else if (parsed.id !== undefined) {
           ws.send(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, error: { code: -32602, message: 'Missing sessionId or summary' } }));
@@ -599,51 +554,34 @@ export function startServer(options: ServerOptions): ServerResult {
       if (parsed?.method === 'session/load' && parsed.id != null) {
         const requestedId = parsed.params?.sessionId;
         if (requestedId) {
-          const buf = sessionBuffers.get(requestedId);
-          if (buf) {
+          const replay = sessionBuffer.replaySession(requestedId);
+          if (replay) {
             // We have a buffer for this session — replay it instead of asking the CLI
-            log.session('replaying %d buffered updates for session %s', buf.history.length, requestedId);
-            activeSessionId = requestedId;
-            const replayResult = JSON.parse(buf.result);
-            if (buf.activePromptRequestId != null) {
+            const replayResult = JSON.parse(replay.result);
+            if (replay.promptInProgress) {
               replayResult.promptInProgress = true;
             }
             ws.send(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, result: replayResult }));
-            for (const line of buf.history) {
+            for (const line of replay.history) {
               ws.send(line);
             }
             return; // Don't forward to bridge
           }
           // No buffer — forward to CLI and start tracking
-          activeSessionId = requestedId;
+          sessionBuffer.activeSessionId = requestedId;
           pendingSessionLoadIds.add(parsed.id);
         }
       }
 
       // Buffer outgoing prompts as user_message_chunk so replay includes user messages
-      if (parsed?.method === 'session/prompt' && activeSessionId) {
+      if (parsed?.method === 'session/prompt' && sessionBuffer.activeSessionId) {
         const promptParams = parsed.params as { sessionId?: string; prompt?: Array<{ type: string; text?: string }> } | undefined;
         const sid = promptParams?.sessionId;
-        const buf = sid ? sessionBuffers.get(sid) : undefined;
-        if (buf) {
-          // Track the in-flight prompt so we can tell reconnecting clients
-          if (parsed.id != null) {
-            buf.activePromptRequestId = parsed.id;
-          }
-          if (promptParams?.prompt) {
-            for (const part of promptParams.prompt) {
-              if (part.type === 'text' && part.text) {
-                buf.history.push(JSON.stringify({
-                  jsonrpc: '2.0',
-                  method: 'session/update',
-                  params: {
-                    sessionId: sid,
-                    update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: part.text } },
-                  },
-                }));
-              }
-            }
-          }
+        if (sid && parsed.id != null && promptParams?.prompt) {
+          sessionBuffer.trackPrompt(parsed.id, sid, promptParams.prompt);
+        } else if (sid && parsed.id != null) {
+          // Track even without prompt content (sets activePromptRequestId)
+          sessionBuffer.trackPrompt(parsed.id, sid, []);
         }
       }
 
