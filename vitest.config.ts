@@ -17,7 +17,15 @@ export default defineConfig({
         test: {
           name: "unit",
           environment: "node",
-          include: ["test/unit/**/*.test.ts", "test/integration/**/*.test.ts"],
+          include: ["test/unit/**/*.test.ts"],
+        },
+      },
+      {
+        test: {
+          name: "integration",
+          environment: "node",
+          include: ["test/integration/**/*.test.ts"],
+          testTimeout: 30000,
         },
       },
       {
