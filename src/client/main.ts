@@ -2,11 +2,12 @@ import { AcpClient, ConnectionState } from './acp-client.js';
 import { Conversation } from './conversation.js';
 import { ChatList } from './ui/chat.js';
 import { showPermissionRequest, cancelAllPermissions } from './ui/permission.js';
-import { fetchSessions, openSessionsModal, SessionsModal } from './ui/sessions.js';
+import { SessionsModal } from './ui/sessions.js';
 import { CommandPalette, type PaletteItem } from './ui/command-palette.js';
-import { getCompletions, parseSlashCommand, setAvailableModels, findModelName } from './slash-commands.js';
+import { getCompletions, setAvailableModels } from './slash-commands.js';
 import { render, h } from 'preact';
 import 'material-symbols/outlined.css';
+import { handleSend, type AgentMode } from './prompt-controller.js';
 
 // ─── DOM References ───────────────────────────────────────────────────
 
@@ -20,7 +21,6 @@ let yoloMode = localStorage.getItem('uplink-yolo') === 'true';
 
 // ─── Mode ─────────────────────────────────────────────────────────────
 
-type AgentMode = 'chat' | 'plan' | 'autopilot';
 let currentMode: AgentMode = 'chat';
 
 function applyMode(mode: AgentMode): void {
@@ -82,12 +82,6 @@ renderChat();
 const sessionsModalContainer = document.createElement('div');
 document.body.appendChild(sessionsModalContainer);
 render(h(SessionsModal, {}), sessionsModalContainer);
-
-/** Clear all conversation state when session changes. */
-function clearConversation(): void {
-  conversation.clear();
-  cancelAllPermissions(conversation);
-}
 
 // ─── WebSocket / ACP Client ──────────────────────────────────────────
 
@@ -174,69 +168,17 @@ sendBtn.addEventListener('click', async () => {
   hidePalette();
   document.documentElement.setAttribute('data-mode', currentMode);
 
-  // Shell commands: !<command>
-  if (text.startsWith('!')) {
-    const command = text.slice(1).trim();
-    if (!command) return;
-
-    conversation.addUserMessage(`$ ${command}`);
-
-    try {
-      const result = await client.sendRawRequest<{
-        stdout: string;
-        stderr: string;
-        exitCode: number;
-      }>('uplink/shell', { command });
-      conversation.addShellResult(command, result.stdout, result.stderr, result.exitCode);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      conversation.addShellResult(command, '', errorMessage, 1);
-    }
-    return;
-  }
-
-  // Slash commands
-  let promptText = text;
-  const parsed = parseSlashCommand(text);
-  if (parsed) {
-    if (parsed.kind === 'client') {
-      const remainingPrompt = handleClientCommand(parsed.command, parsed.arg);
-      if (!remainingPrompt) return;
-      // Mode command with a prompt — send the prompt portion
-      promptText = remainingPrompt;
-    } else if (parsed.command === '/model' && parsed.arg) {
-      const name = findModelName(parsed.arg);
-      if (name) {
-        modelLabel.textContent = name;
-        modelLabel.hidden = false;
-      }
-    }
-  }
-
-  conversation.addUserMessage(text);
-
-  // In plan mode, prefix the message to instruct the agent to plan
-  if (currentMode === 'plan' && !text.startsWith('/')) {
-    promptText = `/plan ${promptText}`;
-  }
-
-  const MAX_AUTOPILOT_TURNS = 25;
-
-  try {
-    let stopReason = await client.prompt(promptText);
-    // In autopilot mode, auto-continue when the agent ends its turn
-    let turns = 0;
-    while (currentMode === 'autopilot' && stopReason === 'end_turn' && turns < MAX_AUTOPILOT_TURNS) {
-      turns++;
-      conversation.addUserMessage('continue');
-      stopReason = await client.prompt('continue');
-    }
-    if (turns >= MAX_AUTOPILOT_TURNS) {
-      conversation.addSystemMessage('Autopilot stopped: reached maximum turns');
-    }
-  } catch (err) {
-    console.error('Prompt error:', err);
-  }
+  await handleSend(text, {
+    client,
+    conversation,
+    clientCwd,
+    getMode: () => currentMode,
+    setMode: applyMode,
+    yoloMode: () => yoloMode,
+    setYoloMode: (on) => { yoloMode = on; localStorage.setItem('uplink-yolo', String(on)); },
+    modelLabel,
+    applyTheme,
+  });
 });
 
 cancelBtn.addEventListener('click', () => {
@@ -368,113 +310,6 @@ function acceptCompletion(item: PaletteItem): void {
     // Concrete sub-option selected — execute
     hidePalette();
     sendBtn.click();
-  }
-}
-
-// ─── Slash Command Handlers ───────────────────────────────────────────
-
-/** Handle a client-side command. Returns a remaining prompt to send, or undefined. */
-function handleClientCommand(command: string, arg: string): string | undefined {
-  switch (command) {
-    case '/theme':
-      applyTheme(arg || 'auto');
-      conversation.addSystemMessage(`Theme set to ${arg || 'auto'}`);
-      return undefined;
-    case '/yolo': {
-      const on = arg === '' || arg === 'on';
-      yoloMode = on;
-      localStorage.setItem('uplink-yolo', String(yoloMode));
-      conversation.addSystemMessage(`Auto-approve ${yoloMode ? 'enabled' : 'disabled'}`);
-      return undefined;
-    }
-    case '/session':
-      handleSessionCommand(arg);
-      return undefined;
-    case '/agent':
-      applyMode('chat');
-      conversation.addSystemMessage('Switched to agent mode');
-      return arg || undefined;
-    case '/plan':
-      applyMode('plan');
-      conversation.addSystemMessage('Switched to plan mode');
-      return arg || undefined;
-    case '/autopilot':
-      applyMode('autopilot');
-      conversation.addSystemMessage('Switched to autopilot mode');
-      return arg || undefined;
-    case '/clear':
-      handleClearCommand();
-      return undefined;
-  }
-  return undefined;
-}
-
-async function handleClearCommand(): Promise<void> {
-  if (!client) return;
-  clearConversation();
-  // Clear server-side replay buffer
-  if (client.currentSessionId) {
-    client.sendRawRequest('uplink/clear_history', { sessionId: client.currentSessionId }).catch(() => {});
-  }
-  // Send /clear to the CLI so it can clear its context
-  try {
-    await client.prompt('/clear');
-  } catch (err) {
-    console.error('Failed to send /clear:', err);
-  }
-}
-
-async function handleSessionCommand(arg: string): Promise<void> {
-  if (!client || !clientCwd) return;
-
-  if (arg === 'create' || arg === 'new') {
-    clearConversation();
-    try {
-      await client.newSession();
-    } catch (err) {
-      console.error('Failed to create new session:', err);
-    }
-    return;
-  }
-
-  if (arg.startsWith('rename ')) {
-    const name = arg.slice(7).trim();
-    if (!name || !client.currentSessionId) return;
-    try {
-      await client.sendRawRequest('uplink/rename_session', {
-        sessionId: client.currentSessionId,
-        summary: name,
-      });
-      conversation.addSystemMessage(`Session renamed to "${name}"`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      conversation.addSystemMessage(`Failed to rename: ${msg}`);
-    }
-    return;
-  }
-
-  if (arg === 'list' || arg === '') {
-    const sessions = await fetchSessions(clientCwd);
-    openSessionsModal(
-      sessions,
-      client.supportsLoadSession,
-      async (sessionId) => {
-        clearConversation();
-        try {
-          await client!.loadSession(sessionId);
-        } catch (err) {
-          console.error('Failed to load session:', err);
-        }
-      },
-      async () => {
-        clearConversation();
-        try {
-          await client!.newSession();
-        } catch (err) {
-          console.error('Failed to create new session:', err);
-        }
-      },
-    );
   }
 }
 
