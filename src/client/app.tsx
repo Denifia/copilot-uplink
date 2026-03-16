@@ -31,6 +31,7 @@ export function App() {
   // ─── Refs ───────────────────────────────────────────────────────────
   const clientRef = useRef<AcpClient | null>(null);
   const clientCwdRef = useRef('');
+  const configModelRef = useRef<string | undefined>(undefined);
   const promptInputRef = useRef<HTMLTextAreaElement>(null);
   const chatAreaRef = useRef<HTMLElement>(null);
 
@@ -118,7 +119,16 @@ export function App() {
       },
       applyTheme,
       cancelPermissions: (conv) => cancelAllPermissions(conv),
-      onSessionChange: () => { sessionKey.value++; },
+      onSessionChange: () => {
+        sessionKey.value++;
+        // Reset model label to config default. The replayed /model command
+        // (if any) will override this during session/load replay.
+        const defaultModel = configModelRef.current;
+        if (defaultModel) {
+          const name = findModelName(defaultModel);
+          modelLabelText.value = name ?? defaultModel;
+        }
+      },
       fetchSessions: (cwd) => fetchSessionsApi(cwd),
       showSessionsModal: openSessionsModal,
     });
@@ -222,6 +232,7 @@ export function App() {
       const tokenResponse = await fetch('/api/token');
       const { token, cwd, configModel } = await tokenResponse.json();
       clientCwdRef.current = cwd;
+      configModelRef.current = configModel;
 
       const wsUrl = `${wsProtocol}//${location.host}/ws?token=${encodeURIComponent(token)}`;
 
