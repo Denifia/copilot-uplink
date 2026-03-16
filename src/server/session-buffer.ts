@@ -72,6 +72,13 @@ export class SessionBuffer {
     return false;
   }
 
+  /** Ensure a buffer entry exists for a session (creates one with empty history if missing). */
+  ensureBuffer(sessionId: string): void {
+    if (!this.sessionBuffers.has(sessionId)) {
+      this.sessionBuffers.set(sessionId, { result: '{}', history: [] });
+    }
+  }
+
   /** Capture session/load result, update or create buffer. */
   captureLoadSession(requestId: number | string, line: string): boolean {
     try {

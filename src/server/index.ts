@@ -617,6 +617,10 @@ export function startServer(options: ServerOptions): ServerResult {
         case 'session_load_forward':
           serverDebugLog.append('proto', 'session_load_forwarded', { sessionId: action.sessionId });
           sessionBuffer.activeSessionId = action.sessionId;
+          // Create buffer entry BEFORE forwarding so replayed session/update
+          // notifications from the CLI are captured. The ACP spec requires
+          // updates to arrive before the session/load response.
+          sessionBuffer.ensureBuffer(action.sessionId);
           pendingSessionLoadIds.add(action.id);
           if (activeBridge === bridge) {
             bridge.send(raw);
