@@ -102,7 +102,7 @@ test('slash command palette appears on / keystroke', async ({ page }) => {
   await expect(palette).toBeVisible();
 
   // Should show available commands
-  await expect(palette.locator('.command-palette-item')).toHaveCount(8); // 8 commands
+  await expect(palette.locator('.command-palette-item')).toHaveCount(9);
 
   // Type more to filter
   await input.fill('/mo');
