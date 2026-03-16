@@ -8,7 +8,7 @@ import { showPermissionRequest, cancelAllPermissions } from './ui/permission.js'
 import { SessionsModal, openSessionsModal } from './ui/sessions.js';
 import { fetchSessions as fetchSessionsApi } from './ui/sessions-api.js';
 import { CommandPalette, type PaletteItem } from './ui/command-palette.js';
-import { getCompletions, setAvailableModels } from './slash-commands.js';
+import { getCompletions, setAvailableModels, findModelName } from './slash-commands.js';
 import { StorageKeys } from './storage-keys.js';
 import { handleSend, type AgentMode } from './prompt-controller.js';
 
@@ -220,7 +220,7 @@ export function App() {
 
     async function initializeClient() {
       const tokenResponse = await fetch('/api/token');
-      const { token, cwd } = await tokenResponse.json();
+      const { token, cwd, configModel } = await tokenResponse.json();
       clientCwdRef.current = cwd;
 
       const wsUrl = `${wsProtocol}//${location.host}/ws?token=${encodeURIComponent(token)}`;
@@ -229,12 +229,34 @@ export function App() {
         wsUrl,
         cwd,
         onStateChange: (state) => updateConnectionStatus(state),
-        onSessionUpdate: (update) => conversation.handleSessionUpdate(update),
+        onSessionUpdate: (update) => {
+          conversation.handleSessionUpdate(update);
+          // When resuming a session, the CLI replays the conversation history
+          // as user_message_chunk and agent_message_chunk notifications. If the
+          // user changed the model via /model during that session, the command
+          // appears in the replay. Detect it so we show the correct model label.
+          // This is needed because the CLI doesn't send a config_option_update
+          // for /model changes (github/copilot-cli#989).
+          if (update.sessionUpdate === 'user_message_chunk'
+            && update.content.type === 'text'
+            && update.content.text.startsWith('/model ')) {
+            const modelArg = update.content.text.slice(7).trim();
+            const name = findModelName(modelArg);
+            if (name) {
+              modelLabelText.value = name;
+              modelLabelHidden.value = false;
+            }
+          }
+        },
         onModelsAvailable: (models, currentModelId) => {
           setAvailableModels(models);
-          if (currentModelId) {
-            const model = models.find((m) => m.modelId === currentModelId);
-            modelLabelText.value = model?.name ?? currentModelId;
+          // The Copilot CLI always reports "claude-sonnet-4.6" as currentModelId
+          // in session/new, ignoring the user's config. Use the config model
+          // as the initial label instead, falling back to what ACP reports.
+          const effectiveModelId = configModel ?? currentModelId;
+          if (effectiveModelId) {
+            const model = models.find((m) => m.modelId === effectiveModelId);
+            modelLabelText.value = model?.name ?? effectiveModelId;
             modelLabelHidden.value = false;
           }
         },

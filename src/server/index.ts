@@ -118,9 +118,27 @@ export function startServer(options: ServerOptions): ServerResult {
 
   const resolvedCwd = options.cwd || process.cwd();
 
+  // Read the user's preferred model from ~/.copilot/config.json.
+  // The Copilot CLI has a bug where session/new always reports
+  // "claude-sonnet-4.6" as the current model, regardless of what the
+  // user configured. We read the config file directly so the client
+  // can show the correct model name on startup.
+  let configModel: string | undefined;
+  try {
+    const configPath = path.join(homedir(), '.copilot', 'config.json');
+    if (existsSync(configPath)) {
+      const config = JSON.parse(readFileSync(configPath, 'utf8'));
+      if (typeof config.model === 'string') {
+        configModel = config.model;
+      }
+    }
+  } catch {
+    // Config unreadable - fall back to whatever session/new reports
+  }
+
   // Token endpoint (must be before SPA fallback)
   app.get('/api/token', (_req, res) => {
-    res.json({ token: sessionToken, cwd: resolvedCwd });
+    res.json({ token: sessionToken, cwd: resolvedCwd, configModel });
   });
 
   app.get('/api/debug', (_req, res) => {
