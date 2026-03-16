@@ -122,7 +122,19 @@ function TimelineItem({
     case 'toolCall': {
       const tc = conversation.toolCalls.value.get(entry.toolCallId);
       if (!tc) return null;
-      const permReq = permissions.find(r => r.toolCallId === entry.toolCallId);
+      // Match permission request to this tool call.
+      //
+      // Per the ACP spec, the toolCallId in session/request_permission should
+      // match the toolCallId from the tool_call session update. However, the
+      // Copilot CLI sends a generic ID like "shell-permission" instead of the
+      // real tool call ID. See: https://github.com/github/copilot-cli/issues/989
+      //
+      // Workaround: try exact ID match first (correct ACP behavior), then fall
+      // back to title match (both messages use the same title), then last resort
+      // match the first unresolved permission to the first pending tool call.
+      const permReq = permissions.find(r => r.toolCallId === entry.toolCallId)
+        ?? (tc.status === 'pending' ? permissions.find(r => !r.resolved.peek() && r.title === tc.title) : undefined)
+        ?? (tc.status === 'pending' ? permissions.find(r => !r.resolved.peek()) : undefined);
       return <ToolCallCard tc={tc} permissionRequest={permReq} />;
     }
     case 'plan':

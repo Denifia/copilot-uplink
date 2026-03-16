@@ -201,9 +201,11 @@ async function scenarioFailedToolCall(requestId: number | string): Promise<void>
 }
 
 async function scenarioPermission(requestId: number | string): Promise<void> {
+  // Use a unique tool call ID (like the real CLI does)
+  const toolCallId = `tc-perm-${Date.now()}`;
   sendPromptUpdate(requestId, {
     sessionUpdate: "tool_call",
-    toolCallId: "tc2",
+    toolCallId,
     title: "Writing file",
     kind: "edit",
     status: "pending",
@@ -216,7 +218,9 @@ async function scenarioPermission(requestId: number | string): Promise<void> {
       createRequest(permId, "session/request_permission", {
         sessionId,
         toolCall: {
-          toolCallId: "tc2",
+          // Real CLI sends a different toolCallId here (github/copilot-cli#989).
+          // Match that behavior so tests exercise the title-based fallback.
+          toolCallId: "shell-permission",
           title: "Writing file",
           kind: "edit",
           status: "pending",
@@ -232,7 +236,7 @@ async function scenarioPermission(requestId: number | string): Promise<void> {
   if (outcome.outcome === "selected" && outcome.optionId === "allow") {
     sendPromptUpdate(requestId, {
       sessionUpdate: "tool_call_update",
-      toolCallId: "tc2",
+      toolCallId,
       status: "completed",
       content: [
         { type: "content", content: { type: "text", text: "File written." } },
@@ -242,7 +246,7 @@ async function scenarioPermission(requestId: number | string): Promise<void> {
   } else {
     sendPromptUpdate(requestId, {
       sessionUpdate: "tool_call_update",
-      toolCallId: "tc2",
+      toolCallId,
       status: "failed",
     });
     sendPromptChunk(requestId, "Permission denied.");
