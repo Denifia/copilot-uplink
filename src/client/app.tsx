@@ -25,6 +25,8 @@ export function App() {
   const paletteSelectedIndex = useSignal(0);
   const paletteVisible = useSignal(false);
   const mounted = useSignal(false);
+  /** Incremented on session switch to remount ChatList with fresh scroll state. */
+  const sessionKey = useSignal(0);
 
   // ─── Refs ───────────────────────────────────────────────────────────
   const clientRef = useRef<AcpClient | null>(null);
@@ -116,6 +118,7 @@ export function App() {
       },
       applyTheme,
       cancelPermissions: (conv) => cancelAllPermissions(conv),
+      onSessionChange: () => { sessionKey.value++; },
       fetchSessions: (cwd) => fetchSessionsApi(cwd),
       showSessionsModal: openSessionsModal,
     });
@@ -253,7 +256,7 @@ export function App() {
           );
         },
         onError: (error) => console.error('ACP error:', error),
-        onClearConversation: () => conversation.clear(),
+        onClearConversation: () => { conversation.clear(); sessionKey.value++; },
       });
     }
 
@@ -304,7 +307,7 @@ export function App() {
       <main id="chat-area" ref={chatAreaRef}>
         {mounted.value && chatAreaRef.current && (
           <div class="chat-container chat-messages">
-            <ChatList conversation={conversation} scrollContainer={chatAreaRef.current} />
+            <ChatList key={sessionKey.value} conversation={conversation} scrollContainer={chatAreaRef.current} />
           </div>
         )}
       </main>

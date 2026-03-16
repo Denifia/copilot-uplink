@@ -173,6 +173,8 @@ export function ChatList({
     (!lastMsg || lastMsg.role === 'user');
 
   // Auto-scroll: follow the conversation unless the user scrolled up.
+  // Session switches remount this component (via key={sessionKey}) which
+  // resets ScrollFollower to following=true automatically.
   const followerRef = useRef<ScrollFollower | null>(null);
 
   useEffect(() => {
@@ -184,11 +186,12 @@ export function ChatList({
     };
   }, [scrollContainer]);
 
+  const timeline = conversation.timeline.value;
+
   useEffect(() => {
     followerRef.current?.scrollIfFollowing();
   });
 
-  const timeline = conversation.timeline.value;
   // Read activeRequests so this component re-renders when permissions arrive/resolve
   const permissions = activeRequests.value;
 

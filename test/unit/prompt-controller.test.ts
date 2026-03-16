@@ -50,6 +50,7 @@ function createMockDeps(overrides: Partial<{
     setModelLabel: vi.fn(),
     applyTheme: vi.fn(),
     cancelPermissions: vi.fn(),
+    onSessionChange: vi.fn(),
     fetchSessions: vi.fn().mockResolvedValue([]),
     showSessionsModal: vi.fn(),
   } as PromptControllerDeps & { client: MockClient };
@@ -258,13 +259,14 @@ describe('prompt-controller', () => {
   // ── Clear command ───────────────────────────────────────────────────
 
   describe('handleClearCommand', () => {
-    it('clears conversation messages', async () => {
+    it('clears conversation messages and signals session change', async () => {
       const deps = createMockDeps();
       deps.conversation.addUserMessage('old message');
 
       await handleClearCommand(deps);
 
       expect(deps.conversation.messages.value).toHaveLength(0);
+      expect(deps.onSessionChange).toHaveBeenCalled();
     });
 
     it('sends uplink/clear_history to server', async () => {
@@ -298,6 +300,7 @@ describe('prompt-controller', () => {
 
       expect(deps.conversation.messages.value).toHaveLength(0);
       expect(deps.client.newSession).toHaveBeenCalled();
+      expect(deps.onSessionChange).toHaveBeenCalled();
     });
 
     it('/session rename sends uplink/rename_session with summary', async () => {

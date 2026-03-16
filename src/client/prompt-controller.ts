@@ -20,6 +20,7 @@ export interface PromptControllerDeps {
   setModelLabel: (name: string) => void;
   applyTheme: (theme: string) => void;
   cancelPermissions: (conversation: Conversation) => void;
+  onSessionChange: () => void;
   fetchSessions: (cwd: string) => Promise<SessionInfo[]>;
   showSessionsModal: (
     sessions: SessionInfo[],
@@ -34,6 +35,7 @@ export interface PromptControllerDeps {
 function clearConversation(deps: PromptControllerDeps): void {
   deps.conversation.clear();
   deps.cancelPermissions(deps.conversation);
+  deps.onSessionChange();
 }
 
 // --- Prompt Flow -----------------------------------------------------------
