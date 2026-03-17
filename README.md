@@ -87,7 +87,27 @@ The tunnel URL is **stable per project** — Uplink derives a deterministic tunn
 reuses it on every run. The installed PWA always connects to the same URL. If the bridge is offline the cached app shell
 still opens instantly; it shows a reconnection banner and retries automatically.
 
-> **Tip:** Use `--tunnel-id <name>` if you need explicit control over the tunnel name (e.g., sharing across machines).
+### Using Your Own Tunnel
+
+If you need explicit control over the tunnel name (e.g., sharing a stable URL across machines), create
+a tunnel yourself and hand it to Uplink:
+
+```bash
+# One-time setup
+devtunnel create my-tunnel
+devtunnel port create my-tunnel -p 8080
+
+# Every session — Uplink reads the tunnel's port and adapts to it
+npx @mattkotsenas/uplink@latest --tunnel-id my-tunnel
+```
+
+Uplink reads your tunnel's configured port and starts the server there automatically. You can override
+the port for a single session with `--port`, but Uplink will **never modify** your tunnel's configuration.
+
+> [!NOTE]
+> Auto-persistent tunnels (`--tunnel`) are owned and managed by Uplink. It creates the
+> tunnel, assigns a port, and keeps the configuration in sync. `--tunnel-id` is for tunnels
+> **you** manage.
 
 ## CLI Reference
 
@@ -100,7 +120,7 @@ npx @mattkotsenas/uplink@latest [options]
 | `--port <n>` | Port for the bridge server | random |
 | `--tunnel` | Start a devtunnel for remote access (auto-persistent per project) | off |
 | `--no-tunnel` | Explicitly disable tunnel | — |
-| `--tunnel-id <name>` | Use a specific devtunnel name (implies `--tunnel`) | — |
+| `--tunnel-id <name>` | Use a pre-created devtunnel (reads its port; implies `--tunnel`) | — |
 | `--allow-anonymous` | Allow anonymous tunnel access (no GitHub auth) | off |
 | `--cwd <path>` | Working directory for the Copilot subprocess | current dir |
 | `--help` | Show help and exit | — |

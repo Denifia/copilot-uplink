@@ -106,6 +106,55 @@ If the Copilot CLI process exits unexpectedly:
 3. New eager init is sent immediately
 4. Client experiences a brief "initializing" state
 
+## Dev Tunnels
+
+The optional Dev Tunnel integration exposes the bridge server over HTTPS. There are two
+modes with different ownership semantics.
+
+### Auto-Persistent (`--tunnel`)
+
+Uplink manages the tunnel. It derives a deterministic name from the working directory
+(`uplink-<hash>`) and creates/updates the tunnel via the `devtunnel` CLI.
+
+- First run: picks a random port, creates the tunnel with that port.
+- Subsequent runs: reads the saved port from the tunnel, reuses it.
+- `--port` overrides: the tunnel's port configuration is updated to match (Uplink owns it).
+
+This gives a stable URL per project directory with zero configuration.
+
+### User-Managed (`--tunnel-id <name>`)
+
+The user pre-creates and owns the tunnel. Uplink adapts to it but **never modifies** it -
+no `devtunnel create`, `port create`, or `port delete` calls are made.
+
+- Without `--port`: `resolvePort` calls `getTunnelInfo(tunnelId)` to read the tunnel's
+  configured port and starts the server there.
+- With `--port`: the explicit port overrides the tunnel's port for this session only.
+  The tunnel's configuration is not changed.
+
+### Port Forwarding
+
+Both modes always pass `-p <actual_port>` to `devtunnel host`. This ensures the tunnel
+forwards to the server's actual listen port regardless of what port is saved in the
+tunnel's configuration. Without `-p`, `devtunnel host` relies on pre-configured ports,
+which can silently mismatch if the server ends up on a different port.
+
+```
+# Auto-persistent
+devtunnel host uplink-a1b2c3d4 -p 9005
+
+# User-managed
+devtunnel host my-tunnel -p 9005
+```
+
+### Key Files
+
+| File | Responsibility |
+|------|---------------|
+| `src/server/tunnel.ts` | `devtunnel` CLI wrappers (`getTunnelInfo`, `createTunnel`, `updateTunnelPort`, `startTunnel`) |
+| `src/server/resolve-port.ts` | Port resolution: reads tunnel config, applies `--port` overrides |
+| `bin/cli.ts` | Orchestrates the mode split: auto-persistent creates/updates; user-managed skips mutation |
+
 ## Session Management
 
 ### How Sessions Work in the Copilot CLI
