@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { format } from 'node:util';
 import { Command } from 'commander';
+import debug from 'debug';
 import { startServer } from '../src/server/index.js';
 import { hashCwd, getTunnelInfo, createTunnel, updateTunnelPort, startTunnel, stopTunnel, type TunnelResult } from '../src/server/tunnel.js';
 import { resolvePort } from '../src/server/resolve-port.js';
@@ -57,9 +59,48 @@ const opts = program.opts<{
   verbose?: boolean;
 }>();
 
-// Set DEBUG env before any debug() loggers are created
-if (opts.verbose && !process.env.DEBUG) {
-  process.env.DEBUG = 'copilot-uplink:*';
+function withDebugNamespace(existing: string | undefined, namespace: string): string {
+  const namespaces = (existing ?? '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean);
+
+  if (!namespaces.includes(namespace)) {
+    namespaces.push(namespace);
+  }
+
+  return namespaces.join(',');
+}
+
+function enableVerboseFileLogging(): void {
+  const logsDir = resolve(process.cwd(), 'logs');
+  const verboseLogPath = resolve(logsDir, 'verbose.log');
+  mkdirSync(logsDir, { recursive: true });
+
+  const stream = createWriteStream(verboseLogPath, { flags: 'a' });
+
+  stream.write(`\n=== verbose session ${new Date().toISOString()} ===\n`);
+
+  debug.log = (...args: unknown[]) => {
+    const line = format(...args);
+    stream.write(`${line.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '')}\n`);
+  };
+
+  const closeStream = () => {
+    stream.end();
+  };
+
+  process.once('exit', closeStream);
+  process.once('SIGINT', closeStream);
+  process.once('SIGTERM', closeStream);
+}
+
+// Imported modules may have already created debug() loggers, so explicitly enable them.
+if (opts.verbose) {
+  const namespaces = withDebugNamespace(process.env.DEBUG, 'copilot-uplink:*');
+  process.env.DEBUG = namespaces;
+  debug.enable(namespaces);
+  enableVerboseFileLogging();
 }
 
 const explicitPort = opts.port != null ? parseInt(opts.port, 10) : undefined;

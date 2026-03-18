@@ -1,10 +1,13 @@
 import { ChildProcess, execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import createDebug from 'debug';
 
 const URL_REGEX = /(https:\/\/[^\s,]+devtunnels\.ms[^\s,]*)/i;
 const BUFFER_LIMIT = 4096;
 const URL_TIMEOUT_MS = 30_000;
 const FORCE_KILL_DELAY_MS = 5_000;
+const COMMAND_TIMEOUT_MS = 30_000;
+const log = createDebug('copilot-uplink:tunnel');
 
 // ─── Tunnel name hashing ──────────────────────────────────────────────
 
@@ -20,13 +23,62 @@ interface TunnelInfo {
   port?: number;
 }
 
+function formatCommand(args: readonly string[]): string {
+  return `devtunnel ${args.join(' ')}`;
+}
+
+function normalizeOutput(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (Buffer.isBuffer(value)) {
+    return value.toString('utf8');
+  }
+
+  return '';
+}
+
+function logCommandOutput(command: string, stream: 'stdout' | 'stderr', output: string): void {
+  const text = output.trim();
+  if (text.length > 0) {
+    log('%s %s:\n%s', command, stream, text);
+  }
+}
+
+function runDevTunnelSync(args: string[]): string {
+  const command = formatCommand(args);
+  log('running: %s', command);
+
+  try {
+    const stdout = execFileSync('devtunnel', args, {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: COMMAND_TIMEOUT_MS,
+    });
+
+    logCommandOutput(command, 'stdout', stdout);
+    return stdout;
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException & { stdout?: unknown; stderr?: unknown };
+    const stdout = normalizeOutput(err.stdout);
+    const stderr = normalizeOutput(err.stderr);
+
+    logCommandOutput(command, 'stdout', stdout);
+    logCommandOutput(command, 'stderr', stderr);
+
+    if (err.code === 'ENOENT') {
+      throw new Error(getDevTunnelNotFoundMessage());
+    }
+
+    const details = stderr.trim() || stdout.trim() || err.message;
+    throw new Error(`${command} failed.${details ? `\n${details}` : ''}`);
+  }
+}
+
 export function getTunnelInfo(tunnelName: string): TunnelInfo {
   try {
-    const output = execFileSync('devtunnel', ['show', tunnelName, '--json'], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 30_000,
-    });
+    const output = runDevTunnelSync(['show', tunnelName, '--json']);
     const data = JSON.parse(output);
     const port = data?.tunnel?.ports?.[0]?.portNumber as number | undefined;
     return { exists: true, port };
@@ -36,29 +88,21 @@ export function getTunnelInfo(tunnelName: string): TunnelInfo {
 }
 
 export function createTunnel(tunnelName: string, port: number): void {
-  execFileSync('devtunnel', ['create', tunnelName], {
-    stdio: 'ignore',
-    timeout: 30_000,
-  });
-  execFileSync('devtunnel', ['port', 'create', tunnelName, '-p', String(port)], {
-    stdio: 'ignore',
-    timeout: 30_000,
-  });
+  runDevTunnelSync(['create', tunnelName]);
+  runDevTunnelSync(['port', 'create', tunnelName, '-p', String(port)]);
 }
 
 export function updateTunnelPort(tunnelName: string, oldPort: number, newPort: number): void {
   try {
-    execFileSync('devtunnel', ['port', 'delete', tunnelName, '-p', String(oldPort)], {
-      stdio: 'ignore',
-      timeout: 30_000,
-    });
-  } catch {
+    runDevTunnelSync(['port', 'delete', tunnelName, '-p', String(oldPort)]);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('devtunnel CLI not found')) {
+      throw error;
+    }
+
     // Port may not exist — ignore
   }
-  execFileSync('devtunnel', ['port', 'create', tunnelName, '-p', String(newPort)], {
-    stdio: 'ignore',
-    timeout: 30_000,
-  });
+  runDevTunnelSync(['port', 'create', tunnelName, '-p', String(newPort)]);
 }
 export function getDevTunnelNotFoundMessage(): string {
   switch (process.platform) {
@@ -100,9 +144,11 @@ export async function startTunnel(options: TunnelOptions): Promise<TunnelResult>
     args.push('--allow-anonymous');
   }
 
+  const command = formatCommand(args);
   let child: ChildProcess;
 
   try {
+    log('starting: %s', command);
     child = spawn('devtunnel', args, { stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -118,6 +164,7 @@ export async function startTunnel(options: TunnelOptions): Promise<TunnelResult>
   return new Promise<TunnelResult>((resolve, reject) => {
     let stdoutBuffer = '';
     let stderrBuffer = '';
+    let stdoutLog = '';
     let stderrLog = '';
     let settled = false;
 
@@ -170,7 +217,9 @@ export async function startTunnel(options: TunnelOptions): Promise<TunnelResult>
     };
 
     const handleStdout = (chunk: string): void => {
+      stdoutLog += chunk;
       stdoutBuffer = trimBuffer(stdoutBuffer + chunk);
+      logCommandOutput(command, 'stdout', chunk);
       const url = checkForUrl(stdoutBuffer);
 
       if (url) {
@@ -181,6 +230,7 @@ export async function startTunnel(options: TunnelOptions): Promise<TunnelResult>
     const handleStderr = (chunk: string): void => {
       stderrLog += chunk;
       stderrBuffer = trimBuffer(stderrBuffer + chunk);
+      logCommandOutput(command, 'stderr', chunk);
       const url = checkForUrl(stderrBuffer);
 
       if (url) {
@@ -199,6 +249,8 @@ export async function startTunnel(options: TunnelOptions): Promise<TunnelResult>
 
       if (stderrLog.trim().length > 0) {
         message += `\n${stderrLog.trim()}`;
+      } else if (stdoutLog.trim().length > 0) {
+        message += `\n${stdoutLog.trim()}`;
       }
 
       // Surface actionable hints for common errors

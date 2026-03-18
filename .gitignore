@@ -6,3 +6,4 @@ test-results/
 playwright-report/
 server-debug.log
 denifia-copilot-uplink-*.tgz
+logs/verbose.log

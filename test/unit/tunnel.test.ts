@@ -103,6 +103,18 @@ describe('createTunnel', () => {
       'devtunnel', ['port', 'create', 'uplink-abc12345', '-p', '9005'], expect.any(Object),
     );
   });
+
+  it('surfaces sync stderr details when create fails', () => {
+    const error = new Error('create failed') as Error & { stderr?: string };
+    error.stderr = 'Authentication required';
+    mockExecFileSync.mockImplementation(() => {
+      throw error;
+    });
+
+    expect(() => createTunnel('uplink-abc12345', 9005)).toThrow(
+      'devtunnel create uplink-abc12345 failed.\nAuthentication required',
+    );
+  });
 });
 
 describe('updateTunnelPort', () => {
@@ -235,6 +247,17 @@ describe('startTunnel', () => {
     child.emit('exit', 1, null);
 
     await expect(promise).rejects.toThrow('devtunnel exited with code 1');
+  });
+
+  it('includes stdout when devtunnel exits without stderr details', async () => {
+    const child = createFakeChild();
+    mockSpawn.mockReturnValue(child as any);
+
+    const promise = startTunnel({ port: 3000 });
+    child.stdout.emit('data', 'Waiting for login...\n');
+    child.emit('exit', 1, null);
+
+    await expect(promise).rejects.toThrow('Waiting for login...');
   });
 
   it('rejects with ENOENT hint when devtunnel is not found', async () => {
