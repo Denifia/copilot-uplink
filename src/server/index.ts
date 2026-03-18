@@ -5,6 +5,7 @@ import { exec } from 'node:child_process';
 import { readdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { WebSocketServer, WebSocket } from 'ws';
 import { Bridge, type BridgeOptions } from './bridge.js';
+import { ClientPool } from './client-pool.js';
 import path from 'node:path';
 import { homedir } from 'node:os';
 import type { SessionInfo } from '../shared/acp-types.js';
@@ -151,6 +152,10 @@ export function startServer(options: ServerOptions): ServerResult {
         recentSessionCount: bufSnapshot.recentSessionCount,
         bridgeAlive: activeBridge?.isAlive() ?? false,
         hasCachedInit: cachedInitializeResponse != null,
+        clients: {
+          total: clientPool.size,
+          ...clientPool.countByOrigin(),
+        },
       },
     });
   });
@@ -207,11 +212,13 @@ export function startServer(options: ServerOptions): ServerResult {
   const server = createServer(app);
   const wss = new WebSocketServer({ server, path: '/ws' });
 
-  // Track the active bridge, socket, and cached protocol state
+  // Track the active bridge and cached protocol state
   let activeBridge: Bridge | null = null;
-  let activeSocket: WebSocket | null = null;
   let cachedInitializeResponse: string | null = null;
   let initializePromise: Promise<string> | null = null;
+
+  // Multi-client connection pool — manages local, LAN, and tunnel connections
+  const clientPool = new ClientPool();
 
   // Session replay buffer — remembers session history so we can replay it
   // when a client reconnects and session/load returns "already loaded".
@@ -264,13 +271,11 @@ export function startServer(options: ServerOptions): ServerResult {
     log.timing('bridge spawn: %dms', Date.now() - spawnStart);
     serverDebugLog.append('conn', 'bridge_spawn', { spawnMs: Date.now() - spawnStart });
 
-    // When bridge dies on its own, clean up
+    // When bridge dies on its own, close all clients and clean up
     bridge.onClose((code) => {
       log.bridge('closed with code %d', code);
       serverDebugLog.append('conn', 'bridge_close', { code });
-      if (activeSocket?.readyState === WebSocket.OPEN) {
-        activeSocket.close(1000, 'Bridge closed');
-      }
+      clientPool.closeAll(1000, 'Bridge closed');
       if (activeBridge === bridge) {
         activeBridge = null;
         cachedInitializeResponse = null;
@@ -286,8 +291,128 @@ export function startServer(options: ServerOptions): ServerResult {
     bridge.onError((err) => {
       log.bridge('error: %O', err);
       serverDebugLog.append('conn', 'bridge_error', { error: String(err) });
-      if (activeSocket?.readyState === WebSocket.OPEN) {
-        activeSocket.close(1011, 'Bridge error');
+      clientPool.closeAll(1011, 'Bridge error');
+    });
+
+    // Set the full bridge→client message handler once per bridge instance.
+    // This must be set here (not per-connection) so all clients share one handler.
+    bridge.onMessage((line) => {
+      const action = routeBridgeMessage(line, {
+        eagerInitId: resolveEagerInit ? EAGER_INIT_ID : null,
+        pendingServerRpcIds: new Set(pendingServerRpcs.keys()),
+        wsOpen: clientPool.hasAny(),
+      });
+
+      switch (action.type) {
+        case 'eager_init_resolved':
+          cachedInitializeResponse = action.response;
+          log.timing('eager initialize complete');
+          resolveEagerInit?.(action.response);
+          resolveEagerInit = null;
+          rejectEagerInit = null;
+          return;
+        case 'eager_init_rejected':
+          rejectEagerInit?.(new Error(action.error));
+          resolveEagerInit = null;
+          rejectEagerInit = null;
+          return;
+        case 'server_rpc_resolved': {
+          const rpc = pendingServerRpcs.get(action.id)!;
+          pendingServerRpcs.delete(action.id);
+          clearTimeout(rpc.timeout);
+          rpc.resolve(action.result);
+          return;
+        }
+        case 'server_rpc_rejected': {
+          const rpc = pendingServerRpcs.get(action.id)!;
+          pendingServerRpcs.delete(action.id);
+          clearTimeout(rpc.timeout);
+          rpc.reject(new Error(action.error));
+          return;
+        }
+        case 'drop': {
+          // Buffer + track even when no clients are connected
+          const activeId = sessionStore.activeSessionId;
+          if (activeId) {
+            const session = sessionStore.get(activeId);
+            if (session) {
+              if (line.includes('"session/update"')) {
+                try {
+                  const msg = JSON.parse(line);
+                  if (msg.method === 'session/update') {
+                    const sid = msg.params?.sessionId;
+                    if (sid && sessionStore.get(sid)) {
+                      sessionStore.get(sid)!.recordUpdate(line);
+                    }
+                  }
+                } catch { /* Not valid JSON */ }
+              }
+              session.checkPromptCompletion(line);
+            }
+          }
+          return;
+        }
+        case 'forward': {
+          // Buffer session/update notifications for replay on reconnect
+          const fwdActiveId = sessionStore.activeSessionId;
+          if (fwdActiveId) {
+            if (line.includes('"session/update"')) {
+              try {
+                const msg = JSON.parse(line);
+                if (msg.method === 'session/update') {
+                  const sid = msg.params?.sessionId;
+                  if (sid) {
+                    const targetSession = sessionStore.get(sid);
+                    if (targetSession) targetSession.recordUpdate(line);
+                  }
+                }
+              } catch { /* Not valid JSON */ }
+            }
+            // Track prompt completion before forwarding
+            const activeSession = sessionStore.get(fwdActiveId);
+            if (activeSession) activeSession.checkPromptCompletion(line);
+          }
+
+          // Capture session/new and session/load results.
+          // Per-client pending ID sets are checked so the correct session is recorded.
+          // The pool is intentionally small (local + LAN + at most 1 tunnel), so the
+          // linear scan here is O(n) with n ≤ ~5 and is not a performance concern.
+          let parsedId: number | string | undefined;
+          let parsedResult: { sessionId?: string } | undefined;
+          try {
+            const parsed = JSON.parse(line) as { id?: number | string; result?: { sessionId?: string } };
+            parsedId = parsed.id;
+            parsedResult = parsed.result;
+          } catch { /* Not valid JSON */ }
+
+          if (parsedId != null) {
+            for (const conn of clientPool) {
+              if (conn.pendingSessionNewIds.has(parsedId) && parsedResult?.sessionId) {
+                const newSid = parsedResult.sessionId;
+                sessionStore.activeSessionId = newSid;
+                const session = sessionStore.getOrCreate(newSid, resolvedCwd, JSON.stringify(parsedResult));
+                session.activate();
+                sessionStore.registerRecent(newSid, resolvedCwd);
+                conn.pendingSessionNewIds.delete(parsedId);
+                break;
+              }
+              if (conn.pendingSessionLoadIds.has(parsedId) && parsedResult) {
+                if (sessionStore.activeSessionId) {
+                  const session = sessionStore.get(sessionStore.activeSessionId);
+                  if (session) {
+                    session.result = JSON.stringify(parsedResult);
+                  }
+                }
+                conn.pendingSessionLoadIds.delete(parsedId);
+                break;
+              }
+            }
+          }
+
+          // Broadcast to all connected clients
+          clientPool.broadcast(line);
+          return;
+        }
       }
     });
 
@@ -362,6 +487,8 @@ export function startServer(options: ServerOptions): ServerResult {
 
   function eagerInitialize(): void {
     const bridge = ensureBridge();
+    // The full bridge.onMessage handler is already set by ensureBridge().
+    // It handles the EAGER_INIT_ID response via routeBridgeMessage's eagerInitId option.
 
     initializePromise = new Promise<string>((resolve, reject) => {
       resolveEagerInit = resolve;
@@ -369,12 +496,6 @@ export function startServer(options: ServerOptions): ServerResult {
     });
     // Prevent unhandled rejection if bridge dies before anyone awaits
     initializePromise.catch(() => {});
-
-    // The response will be caught by whatever onMessage handler is active.
-    // It checks for EAGER_INIT_ID and calls resolveEagerInit.
-    bridge.onMessage((line) => {
-      handleEagerInitResponse(line);
-    });
 
     bridge.send(JSON.stringify({
       jsonrpc: '2.0',
@@ -390,29 +511,6 @@ export function startServer(options: ServerOptions): ServerResult {
     log.session('eager initialize sent');
   }
 
-  function handleEagerInitResponse(line: string): boolean {
-    if (!resolveEagerInit) return false;
-    try {
-      const msg = JSON.parse(line);
-      if (msg.id === EAGER_INIT_ID && msg.result) {
-        cachedInitializeResponse = JSON.stringify(msg.result);
-        log.timing('eager initialize complete');
-        resolveEagerInit(cachedInitializeResponse);
-        resolveEagerInit = null;
-        rejectEagerInit = null;
-        return true;
-      } else if (msg.id === EAGER_INIT_ID && msg.error) {
-        rejectEagerInit!(new Error(msg.error.message ?? 'Eager initialize failed'));
-        resolveEagerInit = null;
-        rejectEagerInit = null;
-        return true;
-      }
-    } catch {
-      // Not valid JSON — ignore
-    }
-    return false;
-  }
-
   eagerInitialize();
 
   wss.on('connection', (ws, request) => {
@@ -425,16 +523,12 @@ export function startServer(options: ServerOptions): ServerResult {
       return;
     }
 
-    // Enforce single connection (close old socket, but DON'T kill bridge)
-    if (activeSocket && activeSocket.readyState === WebSocket.OPEN) {
-      log.server('new connection replacing existing one');
-      serverDebugLog.append('conn', 'ws_replaced');
-      activeSocket.close();
-    }
+    // Classify origin and add to pool (pool handles tunnel eviction)
+    const origin = ClientPool.classifyOrigin(request);
+    const conn = clientPool.add(ws, origin);
 
-    log.server('client connected');
-    serverDebugLog.append('conn', 'ws_connected');
-    activeSocket = ws;
+    log.server('client connected [%s] id=%s', origin, conn.id);
+    serverDebugLog.append('conn', 'ws_connected', { id: conn.id, origin });
 
     let bridge: Bridge;
     try {
@@ -442,131 +536,9 @@ export function startServer(options: ServerOptions): ServerResult {
     } catch (err) {
       log.server('failed to spawn bridge: %O', err);
       ws.close(1011, 'Failed to spawn bridge');
+      clientPool.remove(conn.id);
       return;
     }
-
-    // Track pending session/new request IDs for session recording
-    const pendingSessionNewIds = new Set<number | string>();
-    // Track pending session/load request IDs for capturing the result
-    const pendingSessionLoadIds = new Set<number | string>();
-
-    // Bridge -> WebSocket (forward messages, intercept session/new and eager init)
-    bridge.onMessage((line) => {
-      // Route through pure decision function
-      const action = routeBridgeMessage(line, {
-        eagerInitId: resolveEagerInit ? EAGER_INIT_ID : null,
-        pendingServerRpcIds: new Set(pendingServerRpcs.keys()),
-        wsOpen: ws.readyState === WebSocket.OPEN,
-      });
-
-      switch (action.type) {
-        case 'eager_init_resolved':
-          cachedInitializeResponse = action.response;
-          log.timing('eager initialize complete');
-          resolveEagerInit?.(action.response);
-          resolveEagerInit = null;
-          rejectEagerInit = null;
-          return;
-        case 'eager_init_rejected':
-          rejectEagerInit?.(new Error(action.error));
-          resolveEagerInit = null;
-          rejectEagerInit = null;
-          return;
-        case 'server_rpc_resolved': {
-          const rpc = pendingServerRpcs.get(action.id)!;
-          pendingServerRpcs.delete(action.id);
-          clearTimeout(rpc.timeout);
-          rpc.resolve(action.result);
-          return;
-        }
-        case 'server_rpc_rejected': {
-          const rpc = pendingServerRpcs.get(action.id)!;
-          pendingServerRpcs.delete(action.id);
-          clearTimeout(rpc.timeout);
-          rpc.reject(new Error(action.error));
-          return;
-        }
-        case 'drop': {
-          // Buffer + track even when WS is closed
-          const activeId = sessionStore.activeSessionId;
-          if (activeId) {
-            const session = sessionStore.get(activeId);
-            if (session) {
-              if (line.includes('"session/update"')) {
-                try {
-                  const msg = JSON.parse(line);
-                  if (msg.method === 'session/update') {
-                    const sid = msg.params?.sessionId;
-                    if (sid && sessionStore.get(sid)) {
-                      sessionStore.get(sid)!.recordUpdate(line);
-                    }
-                  }
-                } catch { /* Not valid JSON */ }
-              }
-              session.checkPromptCompletion(line);
-            }
-          }
-          return;
-        }
-        case 'forward': {
-          // Buffer session/update notifications for replay on reconnect
-          const fwdActiveId = sessionStore.activeSessionId;
-          if (fwdActiveId) {
-            if (line.includes('"session/update"')) {
-              try {
-                const msg = JSON.parse(line);
-                if (msg.method === 'session/update') {
-                  const sid = msg.params?.sessionId;
-                  if (sid) {
-                    const targetSession = sessionStore.get(sid);
-                    if (targetSession) targetSession.recordUpdate(line);
-                  }
-                }
-              } catch { /* Not valid JSON */ }
-            }
-            // Track prompt completion before forwarding
-            const activeSession = sessionStore.get(fwdActiveId);
-            if (activeSession) activeSession.checkPromptCompletion(line);
-          }
-
-          // Capture session/new results (for replay + in-memory listing)
-          if (pendingSessionNewIds.size > 0) {
-            try {
-              const msg = JSON.parse(line);
-              if (msg.id != null && pendingSessionNewIds.has(msg.id) && msg.result?.sessionId) {
-                const newSid = msg.result.sessionId;
-                sessionStore.activeSessionId = newSid;
-                const session = sessionStore.getOrCreate(newSid, resolvedCwd, JSON.stringify(msg.result));
-                session.activate();
-                sessionStore.registerRecent(newSid, resolvedCwd);
-                pendingSessionNewIds.delete(msg.id);
-              }
-            } catch {
-              // Not valid JSON - ignore
-            }
-          }
-
-          // Capture session/load results (for replay)
-          if (pendingSessionLoadIds.size > 0) {
-            try {
-              const msg = JSON.parse(line);
-              if (msg.id != null && pendingSessionLoadIds.has(msg.id) && msg.result) {
-                if (sessionStore.activeSessionId) {
-                  const session = sessionStore.get(sessionStore.activeSessionId);
-                  if (session) {
-                    session.result = JSON.stringify(msg.result);
-                  }
-                }
-                pendingSessionLoadIds.delete(msg.id);
-              }
-            } catch { /* Not valid JSON - ignore malformed session/load response */ }
-          }
-
-          ws.send(line);
-          return;
-        }
-      }
-    });
 
     // WebSocket -> Bridge (with uplink-specific message interception)
     ws.on('message', (message) => {
@@ -644,7 +616,7 @@ export function startServer(options: ServerOptions): ServerResult {
             // Race: session disappeared between route and execute - forward instead
             serverDebugLog.append('proto', 'session_load_forwarded', { sessionId: action.sessionId });
             sessionStore.activeSessionId = action.sessionId;
-            pendingSessionLoadIds.add(action.id);
+            conn.pendingSessionLoadIds.add(action.id);
             if (activeBridge === bridge) {
               bridge.send(raw);
             }
@@ -667,6 +639,7 @@ export function startServer(options: ServerOptions): ServerResult {
             historyLength: session.history.length,
             promptInProgress: session.hasActivePrompt,
           });
+          // Replay is sent only to the requesting client
           ws.send(JSON.stringify({ jsonrpc: '2.0', id: action.id, result: replayResult }));
           if (!skipReplay) {
             for (const line of session.history) {
@@ -683,7 +656,7 @@ export function startServer(options: ServerOptions): ServerResult {
           // notifications from the CLI are captured. The ACP spec requires
           // updates to arrive before the session/load response.
           sessionStore.getOrCreate(action.sessionId, resolvedCwd);
-          pendingSessionLoadIds.add(action.id);
+          conn.pendingSessionLoadIds.add(action.id);
           if (activeBridge === bridge) {
             bridge.send(raw);
           }
@@ -691,7 +664,7 @@ export function startServer(options: ServerOptions): ServerResult {
 
         case 'forward':
           if (action.trackSessionNew != null) {
-            pendingSessionNewIds.add(action.trackSessionNew);
+            conn.pendingSessionNewIds.add(action.trackSessionNew);
           }
           if (action.trackPrompt) {
             const promptSession = sessionStore.get(action.trackPrompt.sessionId);
@@ -711,11 +684,9 @@ export function startServer(options: ServerOptions): ServerResult {
     });
 
     ws.on('close', () => {
-      log.server('client disconnected');
-      serverDebugLog.append('conn', 'ws_disconnected');
-      if (activeSocket === ws) {
-        activeSocket = null;
-      }
+      log.server('client disconnected [%s] id=%s', conn.origin, conn.id);
+      serverDebugLog.append('conn', 'ws_disconnected', { id: conn.id });
+      clientPool.remove(conn.id);
       // Bridge stays alive — don't kill it
     });
 
@@ -730,16 +701,7 @@ export function startServer(options: ServerOptions): ServerResult {
       activeBridge = null;
     }
 
-    for (const client of wss.clients) {
-      if (
-        client.readyState === WebSocket.OPEN ||
-        client.readyState === WebSocket.CONNECTING
-      ) {
-        client.close(1001, 'Server shutting down');
-      }
-    }
-
-    activeSocket = null;
+    clientPool.closeAll(1001, 'Server shutting down');
   };
 
   const exposedInit = initializePromise!.then(() => {});
