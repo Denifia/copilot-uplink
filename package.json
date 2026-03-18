@@ -11,7 +11,7 @@
     "node": ">=22.14.0"
   },
   "bin": {
-    "uplink": "./dist/bin/cli.js"
+    "copilot-uplink": "./dist/bin/cli.js"
   },
   "files": [
     "dist/bin",

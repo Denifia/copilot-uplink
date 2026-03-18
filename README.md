@@ -115,6 +115,12 @@ the port for a single session with `--port`, but Uplink will **never modify** yo
 npx @denifia/copilot-uplink@latest [options]
 ```
 
+If you install the package globally instead of using `npx`, invoke it as:
+
+```bash
+copilot-uplink [options]
+```
+
 | Flag | Description | Default |
 |---|---|---|
 | `--port <n>` | Port for the bridge server | random |

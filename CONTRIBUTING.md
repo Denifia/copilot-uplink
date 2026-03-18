@@ -129,5 +129,5 @@ and [npm package page](https://www.npmjs.com/package/@denifia/copilot-uplink).
 ```bash
 npm pack
 npm install -g ./denifia-copilot-uplink-<version>.tgz
-uplink --help
+copilot-uplink --help
 ```
