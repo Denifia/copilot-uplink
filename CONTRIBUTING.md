@@ -10,7 +10,7 @@
 ## Setup
 
 ```bash
-git clone https://github.com/MattKotsenas/uplink.git
+git clone https://github.com/denifia/copilot-uplink.git
 cd uplink
 npm install
 ```
@@ -116,18 +116,18 @@ tokens needed).
    git push && git push --tags
    ```
 3. **Create a GitHub Release** from the tag — go to
-   [Releases](https://github.com/MattKotsenas/uplink/releases) → **Draft a
+   [Releases](https://github.com/denifia/copilot-uplink/releases) → **Draft a
    new release** → select the tag → add release notes → **Publish release**.
 4. The `publish.yml` workflow runs automatically: build → test → `npm publish`.
 
 To verify: check the
-[Actions tab](https://github.com/MattKotsenas/uplink/actions/workflows/publish.yml)
-and [npm package page](https://www.npmjs.com/package/@mattkotsenas/uplink).
+[Actions tab](https://github.com/denifia/copilot-uplink/actions/workflows/publish.yml)
+and [npm package page](https://www.npmjs.com/package/@denifia/copilot-uplink).
 
 ### Testing a package locally before release
 
 ```bash
 npm pack
-npm install -g ./mattkotsenas-uplink-<version>.tgz
+npm install -g ./denifia-copilot-uplink-<version>.tgz
 uplink --help
 ```
