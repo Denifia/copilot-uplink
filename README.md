@@ -1,27 +1,124 @@
 # <img src="src/client/public/icon.svg" alt="orbit" width="28" height="28" /> Copilot Uplink
 
-**Remote control for GitHub Copilot CLI from your phone or any browser.**
+> **TL;DR:** Control GitHub Copilot CLI from your phone. Uplink is a mobile-friendly PWA that connects to the Copilot CLI running on your machine, giving you a chat interface to Copilot from anywhere — even lying on the couch with your phone while your computer does the coding.
 
 [![Build](https://img.shields.io/github/actions/workflow/status/denifia/copilot-uplink/ci.yml?branch=main)](https://github.com/denifia/copilot-uplink/actions)
 [![npm](https://img.shields.io/npm/v/@denifia/copilot-uplink)](https://www.npmjs.com/package/@denifia/copilot-uplink)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## Quick Start
+> **Credit:** This project is a fork of [MattKotsenas/uplink](https://github.com/MattKotsenas/uplink), who did all the heavy lifting building the original concept. I've added some features to suit my workflow — see the [features](#features) section.
+
+<p align="center">
+  <img src="docs/demo.gif" alt="Uplink demo - chat, model switching, and plan mode" width="300" />
+</p>
+
+## Installation & Usage
+
+### Prerequisites
+
+- **Node.js 22.14+**
+- **GitHub Copilot CLI** installed and authenticated
+
+### Quick Start
 
 ```bash
+# Navigate to your project
 cd ~/your/project/
 
-# With remote access via devtunnel
+# Start Uplink with remote access
 npx @denifia/copilot-uplink@latest --tunnel
 ```
 
-## What Is This?
+That's it! A QR code will appear in your terminal — scan it with your phone to open the chat interface.
 
-Copilot Uplink gives you a full chat interface to GitHub Copilot CLI from your phone, a tablet, or any browser.
+### Setting Up Dev Tunnels (Required for Remote Access)
 
-A lightweight Node.js bridge spawns `copilot --acp --stdio` as a child process, translates between WebSocket and NDJSON
-(the ACP wire format), and serves a Progressive Web App that renders streaming responses, tool calls, permissions, and
-agent plans. Add a Microsoft Dev Tunnel and the whole thing is reachable from anywhere.
+To access Uplink from your phone or any device outside your local network, you need Microsoft Dev Tunnels.
+
+**Install Dev Tunnels:**
+
+| Platform | Command |
+|----------|---------|
+| macOS | `brew install --cask devtunnel` |
+| Linux | `curl -sL https://aka.ms/DevTunnelCliInstall \| bash` |
+| Windows | `winget install Microsoft.devtunnel` |
+
+**Authenticate once:**
+
+```bash
+devtunnel user login
+```
+
+### Getting the App on Your Phone
+
+1. **Start Uplink with `--tunnel`** and wait for startup to complete
+2. **Scan the tunnel QR code** — your terminal shows two QR codes: one for local network, one for the tunnel
+3. **Add to home screen** — your browser will prompt you to install the PWA
+
+The tunnel URL is **stable per project** — Uplink generates a deterministic tunnel name from your working directory. Reinstalling or restarting always uses the same URL, so your home screen shortcut keeps working.
+
+## Features
+
+- 💬 **Chat interface** with streaming responses
+- 🔧 **Tool call visibility** — see file reads, edits, terminal commands, and more with icons and status
+- 🔐 **Permission prompts** — approve or deny tool actions with tap buttons
+- 📋 **Plan tracking** — view agent plans with priorities and completion status
+- 📱 **PWA** — installable on your phone's home screen, works offline (cached shell)
+- 🌐 **Remote access** via Microsoft Dev Tunnels
+- 🔄 **Auto-reconnect** with exponential backoff (1s → 30s max)
+- 🌙 **Dark/light/auto theme**
+- 🤖 **Agent modes** — `/agent`, `/plan`, and `/autopilot` for different workflows
+- 🚀 **YOLO mode** — auto-approve all permissions when you trust the task
+
+## CLI Reference
+
+```bash
+npx @denifia/copilot-uplink@latest [options]
+# or if installed globally:
+copilot-uplink [options]
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--port <n>` | Port for the bridge server | random |
+| `--tunnel` | Start a devtunnel for remote access | off |
+| `--no-tunnel` | Explicitly disable tunnel | — |
+| `--tunnel-id <name>` | Use a pre-created devtunnel (reads its port) | — |
+| `--allow-anonymous` | Allow anonymous tunnel access (no GitHub auth) | off |
+| `--cwd <path>` | Working directory for Copilot | current dir |
+| `--verbose` | Enable debug logging | off |
+| `--help` | Show help | — |
+
+### Using Your Own Tunnel
+
+If you want explicit control over the tunnel name (e.g., to share across machines):
+
+```bash
+# One-time setup
+devtunnel create my-tunnel
+devtunnel port create my-tunnel -p 8080
+
+# Every session
+npx @denifia/copilot-uplink@latest --tunnel-id my-tunnel
+```
+
+## In-App Commands
+
+Type `/` in the prompt to see all commands:
+
+| Command | Description |
+|---------|-------------|
+| `/model <name>` | Switch AI model |
+| `/agent` | Default agent mode |
+| `/plan` | Plan mode — Copilot plans before executing |
+| `/autopilot` | Autonomous mode — auto-continues until done |
+| `/theme <dark\|light\|auto>` | Set color theme |
+| `/yolo <on\|off>` | Auto-approve all permission requests |
+| `/session <list\|rename>` | Manage sessions |
+| `/clear` | Clear conversation history |
+| `/debug` | Download a debug log |
+
+## How It Works
 
 ```mermaid
 graph LR
@@ -30,173 +127,23 @@ graph LR
     Bridge -.-|"Serves PWA static files<br/>+ WebSocket endpoint"| PWA
 ```
 
-## Features
+1. **Copilot CLI** runs locally in ACP mode, speaking JSON-RPC over stdin/stdout
+2. **Bridge server** spawns the CLI and bridges WebSocket ↔ stdin/stdout
+3. **PWA** connects over WebSocket and renders the chat interface
+4. **Dev Tunnel** (optional) exposes everything over HTTPS for remote access
 
-- 💬 **Chat** with streaming responses
-- 🔧 **Tool call visibility** — see reads, edits, executes, and more with kind icons and status
-- 🔐 **Permission approve / deny** — surface permission requests with option buttons
-- 📋 **Agent plan tracking** — view plan entries with priority and status
-- 📱 **PWA** — installable on your phone's home screen
-- 🌐 **Remote access** via Microsoft Dev Tunnel
-- 🔄 **Auto-reconnect** with exponential backoff (1 s → 30 s max)
-- 🌙 **Dark / light theme**
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical deep-dive.
 
-<p align="center">
-  <img src="docs/demo.gif" alt="Uplink demo - chat, model switching, and plan mode" width="300" />
-</p>
+## Limitations
 
-## Installing Dev Tunnels
-
-Dev Tunnels are required for remote access (`--tunnel`). Install for your platform:
-
-### macOS
-
-```bash
-brew install --cask devtunnel
-```
-
-### Linux
-
-```bash
-curl -sL https://aka.ms/DevTunnelCliInstall | bash
-```
-
-### Windows
-
-```powershell
-winget install Microsoft.devtunnel
-```
-
-After installing, authenticate once:
-
-```bash
-devtunnel user login
-```
-
-## Getting the PWA on Your Phone
-
-1. **Start with tunnel:**
-   ```bash
-   npx @denifia/copilot-uplink@latest --tunnel
-   ```
-2. **Scan the QR code** printed in your terminal with your phone's camera. Uplink prints a labeled
-   local-network QR for the host computer's LAN IP URL (`http://<ip-address>:<port>`), and when
-   `--tunnel` is enabled it also prints a separate tunnel QR several blank lines lower so your
-   camera can isolate either code more easily.
-3. **Add to Home Screen** — your browser will offer an "Install" or "Add to Home Screen" prompt because the app ships a
-    Web App Manifest and Service Worker.
-
-The tunnel URL is **stable per project** — Uplink derives a deterministic tunnel name from your working directory and
-reuses it on every run. The installed PWA always connects to the same URL. If the bridge is offline the cached app shell
-still opens instantly; it shows a reconnection banner and retries automatically.
-
-When `--tunnel` is enabled, Uplink still prints the tunnel URL in the startup checklist for remote access.
-
-### Using Your Own Tunnel
-
-If you need explicit control over the tunnel name (e.g., sharing a stable URL across machines), create
-a tunnel yourself and hand it to Uplink:
-
-```bash
-# One-time setup
-devtunnel create my-tunnel
-devtunnel port create my-tunnel -p 8080
-
-# Every session — Uplink reads the tunnel's port and adapts to it
-npx @denifia/copilot-uplink@latest --tunnel-id my-tunnel
-```
-
-Uplink reads your tunnel's configured port and starts the server there automatically. You can override
-the port for a single session with `--port`, but Uplink will **never modify** your tunnel's configuration.
-
-> [!NOTE]
-> Auto-persistent tunnels (`--tunnel`) are owned and managed by Uplink. It creates the
-> tunnel, assigns a port, and keeps the configuration in sync. `--tunnel-id` is for tunnels
-> **you** manage.
-
-## CLI Reference
-
-```
-npx @denifia/copilot-uplink@latest [options]
-```
-
-If you install the package globally instead of using `npx`, invoke it as:
-
-```bash
-copilot-uplink [options]
-```
-
-| Flag | Description | Default |
-|---|---|---|
-| `--port <n>` | Port for the bridge server | random |
-| `--tunnel` | Start a devtunnel for remote access (auto-persistent per project) | off |
-| `--no-tunnel` | Explicitly disable tunnel | — |
-| `--tunnel-id <name>` | Use a pre-created devtunnel (reads its port; implies `--tunnel`) | — |
-| `--allow-anonymous` | Allow anonymous tunnel access (no GitHub auth) | off |
-| `--cwd <path>` | Working directory for the Copilot subprocess | current dir |
-| `--help` | Show help and exit | — |
-
-## Commands
-
-Type `/` in the prompt to see all available commands:
-
-| Command | Description |
-|---|---|
-| `/model <name>` | Switch AI model |
-| `/agent` | Default agent mode |
-| `/plan` | Plan mode |
-| `/autopilot` | Autonomous mode (auto-continues until done) |
-| `/theme <dark\|light\|auto>` | Set color theme |
-| `/yolo <on\|off>` | Auto-approve all permission requests |
-| `/session <list\|new\|rename>` | Manage sessions |
-| `/clear` | Clear conversation history |
-| `/debug` | Download a debug log (see below) |
-
-### Debug Logs
-
-`/debug` downloads a JSON file (`uplink-debug-{timestamp}.json`) containing structured
-telemetry from both the client and server. This is useful for reporting bugs.
-
-You can analyze the file with the built-in viewer:
-
-```bash
-npx tsx bin/debug-viewer.ts uplink-debug-*.json            # summary
-npx tsx bin/debug-viewer.ts uplink-debug-*.json timeline    # merged client+server events
-npx tsx bin/debug-viewer.ts uplink-debug-*.json conn        # connection events only
-```
-
-> **Privacy warning:** Debug logs may contain personal information including session IDs,
-> file paths, tool call titles, model names, and localStorage contents. Review the file
-> before sharing.
+- **Single client** — one browser at a time per bridge instance
+- **No file/terminal proxying** — the PWA doesn't provide FS or terminal access back to the agent
+- **Auth via devtunnel only** — no custom authentication layer
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, build, and testing instructions.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and release instructions.
 
-## How It Works
+## License
 
-1. **Copilot CLI** runs locally in ACP mode (`copilot --acp --stdio`), speaking newline-delimited JSON-RPC over
-   stdin/stdout.
-2. **Bridge server** spawns the CLI as a child process and bridges messages between its stdin/stdout and a WebSocket
-   endpoint.
-3. **PWA** connects over WebSocket, drives the full ACP lifecycle (`initialize` → `session/new` → `session/prompt`), and
-   renders the streaming response.
-4. **Dev Tunnel** (optional) exposes the bridge server over HTTPS so you can reach it from your phone or any remote
-   browser.
-
-For detailed architecture documentation — including bridge lifecycle, eager initialization, session resume, and
-logging — see [ARCHITECTURE.md](ARCHITECTURE.md).
-
-## Limitations (v1)
-
-- **Single session only** — one browser client at a time.
-- **No file system / terminal proxying** — the PWA does not provide client-side FS or terminal capabilities back to the
-   agent.
-- **No authentication** beyond devtunnel's built-in defaults.
-
-## Roadmap Ideas
-
-- Multi-session support (multiple browser tabs / devices)
-- File explorer integration
-- Push notifications for long-running tasks
-- Syntax-highlighted diffs in tool call output
+MIT — see [LICENSE](LICENSE)
