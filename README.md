@@ -2,8 +2,8 @@
 
 **Remote control for GitHub Copilot CLI from your phone or any browser.**
 
-[![Build](https://img.shields.io/github/actions/workflow/status/MattKotsenas/uplink/ci.yml?branch=main)](https://github.com/MattKotsenas/uplink/actions)
-[![npm](https://img.shields.io/npm/v/@mattkotsenas/uplink)](https://www.npmjs.com/package/@mattkotsenas/uplink)
+[![Build](https://img.shields.io/github/actions/workflow/status/denifia/copilot-uplink/ci.yml?branch=main)](https://github.com/denifia/copilot-uplink/actions)
+[![npm](https://img.shields.io/npm/v/@mattkotsenas/uplink)](https://www.npmjs.com/package/@denifia/copilot-uplink)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## Quick Start
@@ -12,7 +12,7 @@
 cd ~/your/project/
 
 # With remote access via devtunnel
-npx @mattkotsenas/uplink@latest --tunnel
+npx @denifia/copilot-uplink@latest --tunnel
 ```
 
 ## What Is This?
@@ -77,7 +77,7 @@ devtunnel user login
 
 1. **Start with tunnel:**
    ```bash
-   npx @mattkotsenas/uplink@latest --tunnel
+   npx @denifia/copilot-uplink@latest --tunnel
    ```
 2. **Scan the QR code** printed in your terminal with your phone's camera.
 3. **Add to Home Screen** — your browser will offer an "Install" or "Add to Home Screen" prompt because the app ships a
@@ -98,7 +98,7 @@ devtunnel create my-tunnel
 devtunnel port create my-tunnel -p 8080
 
 # Every session — Uplink reads the tunnel's port and adapts to it
-npx @mattkotsenas/uplink@latest --tunnel-id my-tunnel
+npx @denifia/copilot-uplink@latest --tunnel-id my-tunnel
 ```
 
 Uplink reads your tunnel's configured port and starts the server there automatically. You can override
@@ -112,7 +112,7 @@ the port for a single session with `--port`, but Uplink will **never modify** yo
 ## CLI Reference
 
 ```
-npx @mattkotsenas/uplink@latest [options]
+npx @denifia/copilot-uplink@latest [options]
 ```
 
 | Flag | Description | Default |
