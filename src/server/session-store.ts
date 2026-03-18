@@ -2,7 +2,7 @@ import type { SessionInfo } from '../shared/acp-types.js';
 import { Session } from './session.js';
 import createDebug from 'debug';
 
-const log = createDebug('uplink:session');
+const log = createDebug('copilot-uplink:session');
 
 export class SessionStore {
   activeSessionId: string | null = null;

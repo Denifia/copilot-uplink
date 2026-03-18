@@ -18,10 +18,10 @@ import createDebug from 'debug';
 export const serverDebugLog = new DebugLog();
 
 const log = {
-  server: createDebug('uplink:server'),
-  bridge: createDebug('uplink:bridge'),
-  session: createDebug('uplink:session'),
-  timing: createDebug('uplink:timing'),
+  server: createDebug('copilot-uplink:server'),
+  bridge: createDebug('copilot-uplink:bridge'),
+  session: createDebug('copilot-uplink:session'),
+  timing: createDebug('copilot-uplink:timing'),
 };
 
 export interface ServerOptions {
@@ -504,7 +504,7 @@ export function startServer(options: ServerOptions): ServerResult {
       params: {
         protocolVersion: 1,
         clientCapabilities: {},
-        clientInfo: { name: 'uplink', version: '1.0.0' },
+        clientInfo: { name: 'copilot-uplink', version: '1.0.0' },
       },
     }));
 

@@ -291,22 +291,22 @@ logging with zero cost when disabled.
 
 | Namespace | What it logs |
 |---|---|
-| `uplink:server` | Connection events, WebSocket lifecycle |
-| `uplink:bridge` | Bridge spawn, close, errors, stdin/stdout |
-| `uplink:session` | Session listing, buffer replay, eager init lifecycle |
-| `uplink:timing` | Performance measurements (bridge spawn, initialize, etc.) |
+| `copilot-uplink:server` | Connection events, WebSocket lifecycle |
+| `copilot-uplink:bridge` | Bridge spawn, close, errors, stdin/stdout |
+| `copilot-uplink:session` | Session listing, buffer replay, eager init lifecycle |
+| `copilot-uplink:timing` | Performance measurements (bridge spawn, initialize, etc.) |
 
 ### Enabling
 
 ```bash
 # Via environment variable
-DEBUG=uplink:* npx @denifia/copilot-uplink@latest
+DEBUG=copilot-uplink:* npx @denifia/copilot-uplink@latest
 
 # Via CLI flag
 npx @denifia/copilot-uplink@latest --verbose
 
 # Specific namespaces only
-DEBUG=uplink:timing npx @denifia/copilot-uplink@latest
+DEBUG=copilot-uplink:timing npx @denifia/copilot-uplink@latest
 ```
 
 ## Debug Telemetry

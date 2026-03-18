@@ -3,7 +3,7 @@ import { WebSocket } from 'ws';
 import type { IncomingMessage } from 'node:http';
 import createDebug from 'debug';
 
-const log = createDebug('uplink:pool');
+const log = createDebug('copilot-uplink:pool');
 
 export type ConnectionOrigin = 'local' | 'lan' | 'tunnel';
 

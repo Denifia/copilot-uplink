@@ -9,6 +9,8 @@ import { startServer } from '../src/server/index.js';
 import { hashCwd, getTunnelInfo, createTunnel, updateTunnelPort, startTunnel, stopTunnel, type TunnelResult } from '../src/server/tunnel.js';
 import { resolvePort } from '../src/server/resolve-port.js';
 import { isPortAvailable } from '../src/server/is-port-available.js';
+import { getLocalIpUrl } from '../src/server/local-url.js';
+import { formatQrSection } from '../src/shared/qr-layout.js';
 
 const require = createRequire(import.meta.url);
 
@@ -43,7 +45,7 @@ const program = new Command()
   .option('--tunnel-id <name>', 'use a pre-created devtunnel (no auto-setup)')
   .option('--allow-anonymous', 'allow anonymous tunnel access (no GitHub auth)')
   .option('--cwd <path>', 'working directory for Copilot', process.cwd())
-  .option('--verbose', 'enable debug logging (DEBUG=uplink:*)')
+  .option('--verbose', 'enable debug logging (DEBUG=copilot-uplink:*)')
   .parse();
 
 const opts = program.opts<{
@@ -57,7 +59,7 @@ const opts = program.opts<{
 
 // Set DEBUG env before any debug() loggers are created
 if (opts.verbose && !process.env.DEBUG) {
-  process.env.DEBUG = 'uplink:*';
+  process.env.DEBUG = 'copilot-uplink:*';
 }
 
 const explicitPort = opts.port != null ? parseInt(opts.port, 10) : undefined;
@@ -122,6 +124,20 @@ async function main() {
     extraLines++;
   }
 
+  let printedQrSections = 0;
+
+  function printQrSection(label: string, url: string) {
+    const leadingBlankLines = printedQrSections === 0 ? 1 : 4;
+    printedQrSections++;
+
+    qrcode.generate(url, { small: true }, (code) => {
+      const lines = formatQrSection({ label, url, qrCode: code }, leadingBlankLines);
+      for (const line of lines) {
+        printBelow(line);
+      }
+    });
+  }
+
   const staticDir = resolveStaticDir();
   const cwd = resolve(opts.cwd);
   const { port: desiredPort, tunnelName } = resolvePort({
@@ -155,7 +171,9 @@ async function main() {
   }
 
   const actualPort = addr.port;
-  updateStep(0, `http://localhost:${actualPort}`);
+  const localUrl = getLocalIpUrl(actualPort);
+  updateStep(0, localUrl);
+  printQrSection('Local network QR:', localUrl);
 
   // ── Step 2: Tunnel ──────────────────────────────────────────────────
   let tunnel: TunnelResult | null = null;
@@ -176,24 +194,13 @@ async function main() {
 
       tunnel = await startTunnel({ port: actualPort, tunnelId, allowAnonymous: opts.allowAnonymous });
       updateStep(1, tunnel.url);
+      printQrSection('Tunnel QR:', tunnel.url);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       updateStep(1, `failed — ${message}`, FAIL);
     }
   } else {
     updateStep(1, 'skipped (use --tunnel to enable)', SKIP);
-  }
-
-  // ── QR code — render as soon as tunnel URL is available ─────────────
-  if (tunnel) {
-    printBelow();
-    printBelow('  Scan to connect:');
-    qrcode.generate(tunnel.url, { small: true }, (code) => {
-      const trimmed = code.endsWith('\n') ? code.slice(0, -1) : code;
-      for (const line of trimmed.split('\n')) {
-        printBelow(line);
-      }
-    });
   }
 
   // ── Step 3: Copilot CLI (init already running in background) ────────

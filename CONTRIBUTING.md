@@ -11,7 +11,7 @@
 
 ```bash
 git clone https://github.com/denifia/copilot-uplink.git
-cd uplink
+cd copilot-uplink
 npm install
 ```
 

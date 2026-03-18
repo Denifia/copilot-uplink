@@ -79,13 +79,18 @@ devtunnel user login
    ```bash
    npx @denifia/copilot-uplink@latest --tunnel
    ```
-2. **Scan the QR code** printed in your terminal with your phone's camera.
+2. **Scan the QR code** printed in your terminal with your phone's camera. Uplink prints a labeled
+   local-network QR for the host computer's LAN IP URL (`http://<ip-address>:<port>`), and when
+   `--tunnel` is enabled it also prints a separate tunnel QR several blank lines lower so your
+   camera can isolate either code more easily.
 3. **Add to Home Screen** — your browser will offer an "Install" or "Add to Home Screen" prompt because the app ships a
-   Web App Manifest and Service Worker.
+    Web App Manifest and Service Worker.
 
 The tunnel URL is **stable per project** — Uplink derives a deterministic tunnel name from your working directory and
 reuses it on every run. The installed PWA always connects to the same URL. If the bridge is offline the cached app shell
 still opens instantly; it shows a reconnection banner and retries automatically.
+
+When `--tunnel` is enabled, Uplink still prints the tunnel URL in the startup checklist for remote access.
 
 ### Using Your Own Tunnel
 

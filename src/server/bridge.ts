@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import createDebug from 'debug';
 
-const log = createDebug('uplink:bridge');
+const log = createDebug('copilot-uplink:bridge');
 
 export interface BridgeOptions {
   command: string;      // e.g., "copilot" or "npx tsx src/mock/mock-agent.ts"
