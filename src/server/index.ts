@@ -375,28 +375,35 @@ export function startServer(options: ServerOptions): ServerResult {
 
           // Capture session/new and session/load results.
           // Per-client pending ID sets are checked so the correct session is recorded.
-          let parsedMsg: { id?: number | string; result?: { sessionId?: string } } | undefined;
-          try { parsedMsg = JSON.parse(line); } catch { /* Not valid JSON */ }
+          // The pool is intentionally small (local + LAN + at most 1 tunnel), so the
+          // linear scan here is O(n) with n ≤ ~5 and is not a performance concern.
+          let parsedId: number | string | undefined;
+          let parsedResult: { sessionId?: string } | undefined;
+          try {
+            const parsed = JSON.parse(line) as { id?: number | string; result?: { sessionId?: string } };
+            parsedId = parsed.id;
+            parsedResult = parsed.result;
+          } catch { /* Not valid JSON */ }
 
-          if (parsedMsg?.id != null) {
+          if (parsedId != null) {
             for (const conn of clientPool) {
-              if (conn.pendingSessionNewIds.has(parsedMsg.id) && parsedMsg.result?.sessionId) {
-                const newSid = parsedMsg.result.sessionId;
+              if (conn.pendingSessionNewIds.has(parsedId) && parsedResult?.sessionId) {
+                const newSid = parsedResult.sessionId;
                 sessionStore.activeSessionId = newSid;
-                const session = sessionStore.getOrCreate(newSid, resolvedCwd, JSON.stringify(parsedMsg.result));
+                const session = sessionStore.getOrCreate(newSid, resolvedCwd, JSON.stringify(parsedResult));
                 session.activate();
                 sessionStore.registerRecent(newSid, resolvedCwd);
-                conn.pendingSessionNewIds.delete(parsedMsg.id);
+                conn.pendingSessionNewIds.delete(parsedId);
                 break;
               }
-              if (conn.pendingSessionLoadIds.has(parsedMsg.id) && parsedMsg.result) {
+              if (conn.pendingSessionLoadIds.has(parsedId) && parsedResult) {
                 if (sessionStore.activeSessionId) {
                   const session = sessionStore.get(sessionStore.activeSessionId);
                   if (session) {
-                    session.result = JSON.stringify(parsedMsg.result);
+                    session.result = JSON.stringify(parsedResult);
                   }
                 }
-                conn.pendingSessionLoadIds.delete(parsedMsg.id);
+                conn.pendingSessionLoadIds.delete(parsedId);
                 break;
               }
             }

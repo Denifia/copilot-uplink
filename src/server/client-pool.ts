@@ -34,8 +34,10 @@ export class ClientPool {
    */
   static classifyOrigin(req: IncomingMessage): ConnectionOrigin {
     if (req.headers['x-forwarded-for']) return 'tunnel';
+    // Node.js HTTP parser lowercases all header names; toLowerCase() is a
+    // safety net in case the method is called with a non-normalized request.
     for (const header of Object.keys(req.headers)) {
-      if (header.startsWith('x-ms-devtunnel')) return 'tunnel';
+      if (header.toLowerCase().startsWith('x-ms-devtunnel')) return 'tunnel';
     }
     const addr = req.socket.remoteAddress ?? '';
     if (addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1') return 'local';
