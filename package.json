@@ -1,11 +1,11 @@
 {
-  "name": "@mattkotsenas/uplink",
+  "name": "@denifia/copilot-uplink",
   "version": "0.1.12",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/MattKotsenas/uplink.git"
+    "url": "https://github.com/denifia/copilot-uplink.git"
   },
   "engines": {
     "node": ">=22.14.0"
