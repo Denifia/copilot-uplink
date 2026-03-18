@@ -300,13 +300,13 @@ logging with zero cost when disabled.
 
 ```bash
 # Via environment variable
-DEBUG=uplink:* npx @mattkotsenas/uplink@latest
+DEBUG=uplink:* npx @denifia/copilot-uplink@latest
 
 # Via CLI flag
-npx @mattkotsenas/uplink@latest --verbose
+npx @denifia/copilot-uplink@latest --verbose
 
 # Specific namespaces only
-DEBUG=uplink:timing npx @mattkotsenas/uplink@latest
+DEBUG=uplink:timing npx @denifia/copilot-uplink@latest
 ```
 
 ## Debug Telemetry

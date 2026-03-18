@@ -3,7 +3,7 @@
 **Remote control for GitHub Copilot CLI from your phone or any browser.**
 
 [![Build](https://img.shields.io/github/actions/workflow/status/denifia/copilot-uplink/ci.yml?branch=main)](https://github.com/denifia/copilot-uplink/actions)
-[![npm](https://img.shields.io/npm/v/@mattkotsenas/uplink)](https://www.npmjs.com/package/@denifia/copilot-uplink)
+[![npm](https://img.shields.io/npm/v/@denifia/copilot-uplink)](https://www.npmjs.com/package/@denifia/copilot-uplink)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## Quick Start
