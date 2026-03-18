@@ -34,7 +34,7 @@ const qrcode: {
 } = require('qrcode-terminal');
 
 const program = new Command()
-  .name('uplink')
+  .name('copilot-uplink')
   .description('Remote control for GitHub Copilot CLI')
   .version(version)
   .option('--port <n>', 'port for bridge server (default: random)')
