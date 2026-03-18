@@ -134,17 +134,23 @@ no `devtunnel create`, `port create`, or `port delete` calls are made.
 
 ### Port Forwarding
 
-Both modes always pass `-p <actual_port>` to `devtunnel host`. This ensures the tunnel
-forwards to the server's actual listen port regardless of what port is saved in the
-tunnel's configuration. Without `-p`, `devtunnel host` relies on pre-configured ports,
-which can silently mismatch if the server ends up on a different port.
+Ephemeral tunnels pass `-p <actual_port>` to `devtunnel host` because the port is defined
+at host time.
+
+Named tunnels do **not** pass `-p` to `devtunnel host`. Their forwarded port is configured
+ahead of time via `devtunnel port create` and `devtunnel port delete`; passing `-p` when
+hosting a named tunnel makes the current devtunnel service reject the request as an
+unsupported batch port update.
 
 ```
 # Auto-persistent
-devtunnel host uplink-a1b2c3d4 -p 9005
+devtunnel host uplink-a1b2c3d4
 
 # User-managed
-devtunnel host my-tunnel -p 9005
+devtunnel host my-tunnel
+
+# Ephemeral
+devtunnel host -p 43127
 ```
 
 ### Key Files

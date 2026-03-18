@@ -184,20 +184,17 @@ describe('startTunnel', () => {
     );
   });
 
-  it('passes tunnelId AND -p <port> for named tunnel', async () => {
+  it('omits -p <port> for named tunnel', async () => {
     const child = createFakeChild();
     mockSpawn.mockReturnValue(child as any);
 
-    // port is the server's actual listen port, which may differ from the
-    // port pre-configured on the tunnel. Passing -p ensures devtunnel
-    // forwards to the right local port regardless of tunnel config.
     const promise = startTunnel({ port: 55618, tunnelId: 'my-tunnel' });
     child.stderr.emit('data', 'Connect via browser: https://xyz789.usw2.devtunnels.ms\n');
 
     await promise;
     expect(mockSpawn).toHaveBeenCalledWith(
       'devtunnel',
-      ['host', 'my-tunnel', '-p', '55618'],
+      ['host', 'my-tunnel'],
       expect.any(Object),
     );
   });
@@ -212,7 +209,7 @@ describe('startTunnel', () => {
     await promise;
     expect(mockSpawn).toHaveBeenCalledWith(
       'devtunnel',
-      ['host', 'named', '-p', '3000', '--allow-anonymous'],
+      ['host', 'named', '--allow-anonymous'],
       expect.any(Object),
     );
   });
