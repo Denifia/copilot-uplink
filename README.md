@@ -1,6 +1,6 @@
 # <img src="src/client/public/icon.svg" alt="orbit" width="28" height="28" /> Copilot Uplink
 
-> **TL;DR:** Control GitHub Copilot CLI from your phone. Uplink is a mobile-friendly PWA that connects to the Copilot CLI running on your machine, giving you a chat interface to Copilot from anywhere — even lying on the couch with your phone while your computer does the coding.
+> **TL;DR:** Control GitHub Copilot CLI from your phone. copilot-uplink is a mobile-friendly PWA that connects to the Copilot CLI running on your machine, giving you a chat interface to Copilot from anywhere — even lying on the couch with your phone while your computer does the coding.
 
 [![Build](https://img.shields.io/github/actions/workflow/status/denifia/copilot-uplink/ci.yml?branch=main)](https://github.com/denifia/copilot-uplink/actions)
 [![npm](https://img.shields.io/npm/v/@denifia/copilot-uplink)](https://www.npmjs.com/package/@denifia/copilot-uplink)
@@ -25,7 +25,7 @@
 # Navigate to your project
 cd ~/your/project/
 
-# Start Uplink with remote access
+# Start copilot-uplink with remote access
 npx @denifia/copilot-uplink@latest --tunnel
 ```
 
@@ -33,7 +33,7 @@ That's it! A QR code will appear in your terminal — scan it with your phone to
 
 ### Setting Up Dev Tunnels (Required for Remote Access)
 
-To access Uplink from your phone or any device outside your local network, you need Microsoft Dev Tunnels.
+To access copilot-uplink from your phone or any device outside your local network, you need Microsoft Dev Tunnels.
 
 **Install Dev Tunnels:**
 
@@ -51,11 +51,11 @@ devtunnel user login
 
 ### Getting the App on Your Phone
 
-1. **Start Uplink with `--tunnel`** and wait for startup to complete
+1. **Start copilot-uplink with `--tunnel`** and wait for startup to complete
 2. **Scan the tunnel QR code** — your terminal shows two QR codes: one for local network, one for the tunnel
 3. **Add to home screen** — your browser will prompt you to install the PWA
 
-The tunnel URL is **stable per project** — Uplink generates a deterministic tunnel name from your working directory. Reinstalling or restarting always uses the same URL, so your home screen shortcut keeps working.
+The tunnel URL is **stable per project** — copilot-uplink generates a deterministic tunnel name from your working directory. Reinstalling or restarting always uses the same URL, so your home screen shortcut keeps working.
 
 ## Features
 
@@ -136,8 +136,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical deep-dive.
 
 ## Limitations
 
-- **Single client** — one browser at a time per bridge instance
-- **No file/terminal proxying** — the PWA doesn't provide FS or terminal access back to the agent
+- **Single active input** — multiple clients can connect, but the app expects user input from one at a time
+- **No file/terminal proxying** — the PWA doesn't provide file system or terminal access back to the agent
 - **Auth via devtunnel only** — no custom authentication layer
 
 ## Contributing

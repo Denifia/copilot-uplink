@@ -1,6 +1,6 @@
 # Contributing
 
-How to develop, test, and release Copilot Uplink.
+How to develop, test, and release copilot-uplink.
 
 ## Development Setup
 

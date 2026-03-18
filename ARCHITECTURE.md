@@ -1,10 +1,10 @@
 # Architecture
 
-Technical documentation for Copilot Uplink's internal architecture.
+Technical documentation for copilot-uplink's internal architecture.
 
 ## Overview
 
-Uplink connects three components in a pipeline:
+copilot-uplink connects three components in a pipeline:
 
 ```
 ┌──────────────┐       WebSocket        ┌──────────────┐       stdio/NDJSON      ┌──────────────┐
@@ -17,7 +17,7 @@ Uplink connects three components in a pipeline:
 |-----------|------------|------|
 | **PWA Client** | Preact SPA | Drives ACP protocol, renders chat UI with streaming, tool calls, permissions |
 | **Bridge Server** | Express + WebSocket | Spawns CLI, bridges WebSocket ↔ stdio, caches state for reconnection |
-| **Copilot CLI** | `copilot --acp --stdio` | GitHub's CLI in ACP mode, speaks JSON-RPC 2.0 over NDJSON |
+| **Copilot CLI** | `copilot --acp --stdio` | GitHub's CLI in ACP mode (`--acp` enables the Agent Client Protocol for programmatic control), speaks JSON-RPC 2.0 over NDJSON |
 
 ## Key Source Files
 
@@ -85,7 +85,7 @@ Two modes with different ownership semantics:
 
 ### Auto-Persistent (`--tunnel`)
 
-Uplink owns the tunnel. Creates `uplink-<hash>` from cwd, manages port config.
+copilot-uplink owns the tunnel. Creates `uplink-<hash>` from cwd, manages port config.
 
 ```bash
 npx @denifia/copilot-uplink@latest --tunnel
@@ -93,7 +93,7 @@ npx @denifia/copilot-uplink@latest --tunnel
 
 ### User-Managed (`--tunnel-id`)
 
-User owns the tunnel. Uplink reads but never modifies it.
+User owns the tunnel. copilot-uplink reads but never modifies it.
 
 ```bash
 devtunnel create my-tunnel
@@ -114,7 +114,7 @@ files/            # Session artifacts
 
 ### Hybrid Session Listing
 
-The CLI's `session/list` doesn't refresh after startup, so Uplink supplements:
+The CLI's `session/list` doesn't refresh after startup, so copilot-uplink supplements:
 
 1. **CLI `session/list`** — historical sessions
 2. **In-memory map** — sessions created this bridge lifetime
