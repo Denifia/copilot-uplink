@@ -300,17 +300,11 @@ describe('Server integration', () => {
     expect(ws.readyState).toBe(WebSocket.OPEN);
   });
 
-  it('enforces single connection — old socket closed when new one connects', async () => {
+  it('allows multiple simultaneous local connections', async () => {
     const ws1 = await connectWs();
-
-    const ws1Closed = new Promise<void>((resolve) => {
-      ws1.on('close', () => resolve());
-    });
-
     const ws2 = await connectWs();
 
-    await ws1Closed;
-    expect(ws1.readyState).toBe(WebSocket.CLOSED);
+    expect(ws1.readyState).toBe(WebSocket.OPEN);
     expect(ws2.readyState).toBe(WebSocket.OPEN);
   });
 
