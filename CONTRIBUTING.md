@@ -1,13 +1,15 @@
-# Contributing to Copilot Uplink
+# Contributing
 
-## Prerequisites
+How to develop, test, and release copilot-uplink.
 
-- **Node.js 18+**
-- **npm**
-- **GitHub Copilot CLI** — needed for real usage; the mock agent covers
-  development and testing without it.
+## Development Setup
 
-## Setup
+**Prerequisites:**
+- Node.js 22.14+
+- npm
+- GitHub Copilot CLI (optional — the mock agent works without it)
+
+**Get started:**
 
 ```bash
 git clone https://github.com/denifia/copilot-uplink.git
@@ -15,10 +17,11 @@ cd copilot-uplink
 npm install
 ```
 
-## Development Mode
+## Running Locally
 
-Run the bridge with the **mock agent** so you don't need Copilot CLI
-installed:
+### With the Mock Agent (Recommended)
+
+The mock agent simulates the Copilot CLI — no real Copilot installation needed.
 
 **macOS / Linux:**
 ```bash
@@ -31,19 +34,18 @@ $env:COPILOT_COMMAND="npx tsx src/mock/mock-agent.ts --acp --stdio"
 npm run dev
 ```
 
-Vite serves the PWA with hot-reload; changes to `src/client/` are reflected
-instantly.
+Vite serves the PWA with hot-reload. Changes to `src/client/` reflect instantly.
 
-### Running against a different working directory
+### With the Real Copilot CLI
 
-The dev server uses Vite, which doesn't support `--cwd`. To test against a
-specific project directory, build first and run the CLI directly:
+Build and run directly:
 
 ```bash
-npm run build && node dist/bin/cli.js --cwd /path/to/your/project
+npm run build
+node dist/bin/cli.js --cwd /path/to/your/project
 ```
 
-Or skip the build step with `tsx`:
+Or skip the build:
 
 ```bash
 npx tsx bin/cli.ts --cwd /path/to/your/project
@@ -55,79 +57,87 @@ npx tsx bin/cli.ts --cwd /path/to/your/project
 npm run build
 ```
 
-This compiles the server TypeScript (`tsc`) and bundles the client (`vite build`).
+This compiles TypeScript (`tsc`) and bundles the client (`vite build`).
 
 ## Testing
 
 ```bash
-# Run all tests
-npm test
-
-# Watch mode
-npm run test:watch
+npm test              # Run all tests
+npm run test:watch    # Watch mode
+npm run test:e2e      # Playwright end-to-end tests
+npm run test:all      # Lint + build + unit + e2e
 ```
 
-### Test Layers
+### Test Structure
 
-| Layer | Location | What it covers |
-|---|---|---|
-| **Unit** | `test/unit/bridge.test.ts` | NDJSON framing, message routing, process lifecycle |
-| **Unit** | `test/unit/acp-client.test.ts` | ACP protocol logic, JSON-RPC id correlation, state machine |
-| **Unit** | `test/unit/conversation.test.ts` | Chunk accumulation, tool call tracking, plan tracking |
-| **Unit** | `test/unit/mock-agent.test.ts` | Verifies mock agent produces valid ACP message sequences |
-| **Integration** | `test/integration/full-flow.test.ts` | Full WS client → bridge → mock agent flows: happy path, tool calls, permissions, cancellation, multi-turn |
+| Type | Location | Purpose |
+|------|----------|---------|
+| Unit | `test/unit/` | Bridge, ACP client, conversation state |
+| Integration | `test/integration/` | Full WS client → bridge → mock agent flows |
+| E2E | `test/e2e/` | Browser automation with Playwright |
 
-All automated tests use the **mock agent** as the subprocess so they run
-without a real Copilot CLI installation. The bridge picks up the command from
-the `COPILOT_COMMAND` environment variable; integration tests start the
-bridge on a random port (`:0`) to avoid conflicts.
+All automated tests use the mock agent — no Copilot CLI required.
 
-### Mock Agent
+### Mock Agent Scenarios
 
-`src/mock/mock-agent.ts` is a standalone Node.js script that speaks ACP over
-stdio — the same interface as `copilot --acp --stdio`. It supports seven
-scenarios selected by prompt content:
+The mock agent (`src/mock/mock-agent.ts`) simulates different behaviors based on prompt content:
 
-| Prompt contains | Scenario | Behaviour |
-|---|---|---|
-| *(default)* | `simple-text` | A few `agent_message_chunk` updates, then `end_turn` |
-| `tool` | `tool-call` | Tool call → update (completed) → text → `end_turn` |
-| `permission` | `permission-required` | Tool call → permission request → waits for response → continues |
-| `stream` | `multi-chunk-stream` | Many small text chunks rapidly (tests streaming / backpressure) |
-| `plan` | `plan-then-execute` | Plan update → tool calls that fulfil the plan |
-| `reason` | `reasoning` | Thinking tool call → completed → text → `end_turn` |
-| `refuse` | `error-refusal` | Responds with `stopReason: "refusal"` |
+| Prompt contains | Scenario |
+|-----------------|----------|
+| *(default)* | Simple text response |
+| `tool` | Tool call flow |
+| `permission` | Permission request |
+| `stream` | Rapid multi-chunk streaming |
+| `plan` | Plan + execution |
+| `reason` | Thinking/reasoning mode |
+| `refuse` | Refusal response |
 
-Use these scenarios during development to exercise every UI path without a
-real Copilot CLI.
+## Linting
+
+```bash
+npm run lint:css      # Stylelint for CSS
+```
 
 ## Releasing
 
-Releases are published to npm automatically via GitHub Actions using
-[trusted publishing](https://docs.npmjs.com/trusted-publishers) (no npm
-tokens needed).
+Releases are automated via GitHub Actions with [trusted publishing](https://docs.npmjs.com/trusted-publishers).
 
-1. **Update the version** in `package.json`:
+**Steps:**
+
+1. **Bump the version:**
    ```bash
-   npm version patch   # or minor / major
+   npm version patch  # or minor / major
    ```
-2. **Push the commit and tag:**
+
+2. **Push with tags:**
    ```bash
    git push && git push --tags
    ```
-3. **Create a GitHub Release** from the tag — go to
-   [Releases](https://github.com/denifia/copilot-uplink/releases) → **Draft a
-   new release** → select the tag → add release notes → **Publish release**.
-4. The `publish.yml` workflow runs automatically: build → test → `npm publish`.
 
-To verify: check the
-[Actions tab](https://github.com/denifia/copilot-uplink/actions/workflows/publish.yml)
-and [npm package page](https://www.npmjs.com/package/@denifia/copilot-uplink).
+3. **Create a GitHub Release:**
+   - Go to [Releases](https://github.com/denifia/copilot-uplink/releases)
+   - Click **Draft a new release**
+   - Select the tag
+   - Add release notes
+   - Click **Publish release**
 
-### Testing a package locally before release
+4. The `publish.yml` workflow builds, tests, and publishes to npm automatically.
+
+**Verify:** Check the [Actions tab](https://github.com/denifia/copilot-uplink/actions/workflows/publish.yml) and [npm package](https://www.npmjs.com/package/@denifia/copilot-uplink).
+
+### Testing a Package Locally
+
+Before releasing, you can test the packaged version:
 
 ```bash
 npm pack
-npm install -g ./denifia-copilot-uplink-<version>.tgz
+npm install -g ./denifia-copilot-uplink-*.tgz
 copilot-uplink --help
 ```
+
+## Code Style
+
+- TypeScript throughout
+- Preact for the PWA
+- CSS with stylelint enforcement
+- No comments unless they match existing style or explain complex logic
